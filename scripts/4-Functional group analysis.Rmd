@@ -142,16 +142,16 @@ trait.cor.list <- data.frame(
                 "FM.cruise","FM.current","FM.active.ambush","FM.passive.ambush",
                 "TG.herbivore","TG.omnivore","TG.carnivore","TG.detritivore"),
   label = c("Dry weight","Water content", 
-                "W.S. respiration rate", "W.S. clearance rate",
-                "W.S. excretion rate of ammonia", "W.S. excretion rate of phosphate",
+                "Ws. respiration rate", "Ws. clearance rate",
+                "Ws. ammonia excretion rate", "Ws. phosphate excretion rate",
                 "Body length", "Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "C:N ratio","N:P ratio","C:P ratio",
                 "Ind. respiration rate", "Ind. clearance rate",
-                "Ind. excretion rate of ammonia", "Ind. excretion rate of phosphate",
+                "Ind. ammonia excretion rate", "Ind. phosphate excretion rate",
                 "Carbon weight","Nitrogen weight","Phosphorus weight",
                 "Broadcasting","Brooding",
-                "Cruise","current","Active Ambush","Passive Ambush",
+                "Cruise","Current","Active Ambush","Passive Ambush",
                 "Herbivore","Omnivore","Carnivore","Detritivore")) %>%  
   mutate(trait.group = traitName) %>% 
   mutate(
@@ -283,7 +283,7 @@ ggplot() +
         plot.background = element_rect(fill='white', color=NA))
 
 ggsave(filename = here("figures/fig_s4_correlation_matrix_traits_analyzed.png"),
-    width = 20, height= 16, units = "in", dpi = 300)
+    width = 18, height= 16, units = "in", dpi = 300)
 
 # rm(trait.cor.list, trait.cor, cor.tests, cor.table, res, AA)
 ```
@@ -497,9 +497,9 @@ traits.num <- lvl3.num.matrix %>%
 # Labels of subplots
 tname_label = c("Water content","Body length","Dry weight","Carbon weight",
                 "Ws. respiration rate","Ws. clearance rate",
-                "Ws. excretion rate ammonia","Ws. excretion rate phosphate",
+                "Ws. ammonia excretion rate","Ws. phosphate excretion rate",
                 "Ind. respiration rate","Ind. clearance rate",
-                "Ind. excretion rate ammonia","Ind. excretion rate phosphate",
+                "Ind. ammonia excretion rate","Ind. phosphate excretion rate",
                 "Nitrogen weight","Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "Phosphorus weight","C:N","N:P","C:P")

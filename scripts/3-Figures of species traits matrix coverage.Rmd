@@ -138,10 +138,10 @@ g1 <- ggplot(valueConf.df, aes(y = traitName, x = N.species, fill = valueConf)) 
                                   "Carbon weight", "Nitrogen weight",
                                   "Phosphorus weight", "Ind. respiration rate",
                                   "Ws. respiration rate", 
-                                  "Ind. excretion rate of ammonia",
-                                  "Ws. respiration rate of ammonia",
-                                  "Ind. excretion rate of phosphate",
-                                  "Ws. respiration rate of phosphate",
+                                  "Ind. ammonia excretion rate",
+                                  "Ws. ammonia excretion rate",
+                                  "Ind. phosphate excretion rate",
+                                  "Ws. phosphate excretion rate",
                                   "Ind. clearance rate",
                                   "Ws. clearance rate"))) +
   theme(legend.position = "none") +

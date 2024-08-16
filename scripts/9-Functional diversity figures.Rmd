@@ -294,11 +294,11 @@ ggsave(file = here("figures/fig_7_fundiv_to_annotate.png"),
 
 
 
-plot_grid(div.fdis, div.feve, div.fori,
+plot_grid(div.nsamp, div.fdis, div.feve, div.fori,
           align = "h", axis = "bt",
-          ncol = 1, labels = c("a","b","c"))
+          ncol = 2, labels = c("a","b","c","d"))
 
 ggsave(file = here("figures/fig_s9_fundiv_maps.png"),
-       height = 16, width = 8, dpi = 300, bg = "white")
+       height = 12, width = 16, dpi = 300, bg = "white")
 ```
 

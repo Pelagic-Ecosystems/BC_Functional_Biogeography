@@ -248,9 +248,9 @@ traitplots <- vector("list",2)
 count <- 1
 tname_label = c("Water content","Body length","Dry weight","Carbon weight",
                 "Ws. respiration rate","Ws. clearance rate",
-                "Ws. excretion rate ammonia","Ws. excretion rate phosphate",
+                "Ws. ammonia excretion rate","Ws. phosphate excretion rate",
                 "Ind. respiration rate","Ind. clearance rate",
-                "Ind.excretion rate ammonia","Ind. excretion rate phosphate",
+                "Ind. ammonia excretion rate","Ind. phosphate excretion rate",
                 "Nitrogen weight","Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "Phosphorus weight","C:N","N:P","C:P")
