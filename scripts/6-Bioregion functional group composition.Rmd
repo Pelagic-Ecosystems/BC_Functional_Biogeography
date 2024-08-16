@@ -1,0 +1,640 @@
+---
+title: "Bioregion compositon by functional group"
+author: "Patrick Pata"
+date: "2023-11-02"
+output: html_document
+---
+
+This file calculates the functional group composition of the bioregions. The relative abundance and biomass of functional groups in trait space is also visualized. Bioregions are compared according to the absolute and relative abundance and biomass of functional groups overall, by season, and interannually.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(here)
+library(data.table) # for calculating convex hulls
+library(scales)
+library(ggtext)
+library(ggh4x) # for strip colors
+library(cowplot)
+library(broom)
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+
+theme_set(theme_bw())
+
+# The original community data
+load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+
+# Functional group data + traits
+load(here("data/functional_grouping_results_20240617.RData"))
+
+geomean <- function(x) {  exp(mean(log(x), na.rm = TRUE))  }
+```
+
+
+
+# 2. Bioregion relative composition
+Calculate the total abundance and biomass of each functional group between bioregions
+```{r, fig.width=5}
+strip_fg <- ggh4x::strip_themed(background_x = ggh4x::elem_list_rect(
+  fill = gplots::col2hex(fungrp.colors)))
+
+# Filter the community data to only include the 163 species with trait information
+zoop.bc.species.fun <- zoop.bc %>% 
+  # Add fuctional group information
+  left_join(select(od.revised, Species, fungrp),
+            by = "Species") %>% 
+  filter(!is.na(fungrp)) %>% 
+  # Convert density to by volume
+  left_join(select(zoopmeta, Key, Tow.Depth), by = "Key") %>% 
+  mutate(Abundance.m3 = Abundance.m2 / Tow.Depth,
+         Biomass.mg.m3 = Biomass.mg.m2 / Tow.Depth) %>% 
+  select(Key, Bioregion, Species, 
+         majorgroup, fungrp, 
+         Tow.Depth,
+         Abundance.m2, Biomass.mg.m2,
+         Abundance.m3, Biomass.mg.m3)
+
+zoop.bc.fun <- zoop.bc.species.fun %>% 
+  group_by(Key, Tow.Depth, Bioregion, fungrp) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2), Abundance.m3 = sum(Abundance.m3),
+         Biomass.mg.m2 = sum(Biomass.mg.m2), Biomass.mg.m3 = sum(Biomass.mg.m3), 
+         .groups = "drop") %>% 
+  # Calculate relative abundance and biomass
+  group_by(Key, Bioregion) %>% 
+  mutate(Total.Biomass = sum(Biomass.mg.m2),
+         Total.Abundance = sum(Abundance.m2)) %>% 
+  ungroup() %>% 
+  mutate(Percent.Biomass = Biomass.mg.m2/Total.Biomass*100,
+         Percent.Abundance = Abundance.m2/Total.Abundance*100) %>% 
+  select(-c(Total.Biomass, Total.Abundance)) 
+  
+# save(zoop.bc.species.fun, zoop.bc.fun,
+#      file = here("data/key_fg_abundance_biomass_20240626.RData"))
+```
+
+
+
+# 3. Trait space "heatmaps"
+Color by functional group, size according to abundance or  biomass
+
+
+## Prepare the dataframes
+```{r}
+# Extract the pcoa table from pcoa.vec
+species.pcoa <- pcoa.vec[,c(1:6)] %>% 
+  column_to_rownames("Species")
+
+
+# Calculate average species abundance and biomass for each bioregion
+bioregion.biom <- zoop.bc.species.fun %>% 
+    select(Key, Bioregion, Species, Biomass.mg.m2) %>% 
+  group_by(Bioregion) %>% 
+  mutate(nsamples = length(unique(Key))) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = Species, values_from = Biomass.mg.m2,
+              values_fill = 0) %>% 
+  pivot_longer(cols = -c(Key, Bioregion, nsamples),
+               names_to = "Species", values_to = "Biomass.mg.m2") %>% 
+  mutate(Presence = if_else(Biomass.mg.m2 > 0, 1, 0)) %>% 
+  group_by(Bioregion, Species, nsamples) %>% 
+  summarise(Biomass = mean(Biomass.mg.m2),
+            Presence = sum(Presence) /nsamples*100, .groups = "drop") %>% 
+  distinct()
+
+bioregion.abun <- zoop.bc.species.fun %>% 
+    select(Key, Bioregion, Species, Abundance.m2) %>% 
+  group_by(Bioregion) %>% 
+  mutate(nsamples = length(unique(Key))) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2,
+              values_fill = 0) %>% 
+  pivot_longer(cols = -c(Key, Bioregion, nsamples),
+               names_to = "Species", values_to = "Abundance.m2") %>% 
+  mutate(Presence = if_else(Abundance.m2 > 0, 1, 0)) %>% 
+  group_by(Bioregion, Species, nsamples) %>% 
+  summarise(Abundance = mean(Abundance.m2),
+            Presence = sum(Presence) /nsamples*100, .groups = "drop") %>% 
+  distinct()
+
+# Add this to pcoa.vec - This will exclude taxa not included in the functional group analysis
+sp.regions <- pcoa.vec %>% 
+  left_join(select(bioregion.biom, Species, Bioregion, Biomass, Presence), 
+            by = c("Species")) %>% 
+  left_join(select(bioregion.abun, Species, Bioregion, Abundance), 
+            by = c("Species","Bioregion")) %>% 
+  # Modify bioregion names to include spaces
+  mutate(Bioregion = if_else(Bioregion == "DeepShelf", 
+                             "Deep Shelf", Bioregion),
+         Bioregion = if_else(Bioregion == "DeepFjord", 
+                             "Deep Fjord", Bioregion)) %>% 
+  mutate(Bioregion = factor(Bioregion,
+                            levels = c("Offshore","Deep Shelf",
+                                       "Nearshore","Deep Fjord"))) %>% 
+
+  mutate(fungrp = factor(fungrp, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                            "FG6","FG7","FG8","FG9","FG10"))) %>% 
+  arrange(-Biomass)
+```
+
+
+## PCoA 1 & 2: Abundance + Biomass
+```{r}
+axestoplot <- c(1,2)
+# Create the global and regional hulls
+clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
+  mutate(group = "all") 
+dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
+                 level=clustPoints[,3], key="level")
+hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
+
+
+hplot.abund <- ggplot(data = sp.regions %>% 
+         filter(Presence >= 0), aes(x = PC1, y = PC2)) +
+    geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
+                 color = "white", fill = "white", show.legend = FALSE) +
+
+    # Distribution of species
+    geom_point(data = sp.regions %>% 
+         filter(Presence >= 0),
+               aes(color = fungrp, size = Abundance),
+               alpha = 0.5) +
+    scale_color_manual(values = fungrp.colors,
+                       name = "Functional Groups") +
+    
+    scale_size_area(max_size = 20, breaks=c(10,100,1000,10000,20000),
+                    name = "Abundance\n(indiv m-2)") +
+  
+    theme(aspect.ratio = 1, legend.position="right", 
+          legend.box = "veritcal",
+          panel.background = element_rect(fill = "grey80"),
+          strip.text = element_text(size = 10)) +
+  guides(color = guide_legend(title.position = "top", 
+                              title.hjust = 0.5, ncol = 2,
+                              override.aes = list(size = 3),
+                              order = 2),
+         size = guide_legend(title.position = "top", 
+                              title.hjust = 0.5,
+                             order = 1)) +
+  xlab("PCoA 1") + ylab("PCoA 2") +
+  facet_wrap(~Bioregion, ncol = 2)
+
+hplot.abund
+ggsave(filename = here("figures/fig_4_traits_space_abundance_PC12.png"),
+    width = 7, height= 6, units = "in", dpi = 600, bg = "white")
+
+hplot.biom <- ggplot(data = sp.regions %>% 
+         filter(Presence >= 0), aes(x = PC1, y = PC2)) +
+    geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
+                 color = "white", fill = "white", show.legend = FALSE) +
+  
+    # Distribution of species
+    geom_point(data = sp.regions %>% 
+         filter(Presence >= 0),
+               aes(color = fungrp, size = Biomass),
+               alpha = 0.5) +
+    scale_color_manual(values = fungrp.colors,
+                       name = "Functional Groups") +
+    
+    scale_size_area(max_size = 23, breaks=c(10,100,1000,2000,5000),
+                    name = "Biomass\n(mg m-2)") +
+  
+    theme(aspect.ratio = 1, legend.position="right", 
+          legend.box = "veritcal",
+          panel.background = element_rect(fill = "grey80"),
+          strip.text = element_text(size = 10)) +
+  guides(color = guide_legend(title.position = "top", 
+                              title.hjust = 0.5, ncol = 2,
+                              override.aes = list(size = 3),
+                              order = 2),
+         size = guide_legend(title.position = "top", 
+                              title.hjust = 0.5,
+                             order = 1)) +
+  xlab("PCoA 1") + ylab("PCoA 2") +
+  facet_wrap(~Bioregion, ncol = 2)
+
+hplot.biom
+ggsave(filename = here("figures/fig_5_traits_space_biomass_PC12.png"),
+    width = 7, height= 6, units = "in", dpi = 600, bg = "white")
+
+```
+
+# 4.Table of bioregion comparisons
+```{r}
+zoop.bc.fun.zeros <- zoop.bc.fun %>% 
+  # Create a blank table of Key and functional groups
+  distinct(Key, Bioregion) %>% 
+  left_join(distinct(zoop.bc.fun, Bioregion, fungrp),
+            by = "Bioregion") %>% 
+  # Add the non-zero instances
+  left_join(select(zoop.bc.fun,
+                   Key, Bioregion, fungrp,
+                   Abundance.m2, Biomass.mg.m2,
+                   Percent.Abundance, Percent.Biomass),
+            join_by(Key, Bioregion, fungrp)) %>% 
+  # Convert NAs to zeros
+  mutate(Abundance.m2 = if_else(is.na(Abundance.m2), 0, Abundance.m2),
+         Biomass.mg.m2 = if_else(is.na(Biomass.mg.m2), 0 , Biomass.mg.m2),
+         Percent.Abundance = if_else(is.na(Percent.Abundance), 
+                                     0, Percent.Abundance),
+         Percent.Biomass = if_else(is.na(Percent.Biomass),
+                                   0, Percent.Biomass))
+
+zoop.bc.sum <- zoop.bc.fun.zeros %>% 
+  select(-Key) %>% 
+  pivot_longer(cols = -c(Bioregion, fungrp),
+               names_to = "Metric", values_to = "Value") %>% 
+  group_by(Bioregion, fungrp, Metric) %>% 
+  summarise(ValMean = mean(Value),
+            ValSD = sd(Value), 
+            ValMedian = median(Value),
+            ValIQR = IQR(Value),
+            ValMin = min(Value),
+            ValMax = max(Value),
+            ValN = n(),
+            .groups = "drop") %>% 
+  arrange(Metric, fungrp)
+
+# Per bioregion and functional group
+zoop.bc.sum.table <- zoop.bc.sum %>% 
+  filter(Metric %notin% c("Abundance.m3","Biomass.mg.m3")) %>% 
+  select(Bioregion, fungrp, Metric, ValMean, ValSD) %>% 
+  mutate(ValText = if_else(Metric %in% c("Percent.Abundance",
+                                          "Percent.Biomass"), 
+           paste(round(ValMean,2),"\u00b1",round(ValSD,1)),
+           paste(round(ValMean,0),"\u00b1",round(ValSD,0)))) %>% 
+  select(-c(ValMean, ValSD)) %>% 
+  pivot_wider(names_from = Bioregion,
+              values_from = ValText) 
+
+# Total for all
+zoop.bc.total <- zoop.bc.fun.zeros %>% 
+  group_by(Key, Bioregion) %>% 
+  summarise(Total.Abundance = sum(Abundance.m2),
+            Total.Biomass = sum(Biomass.mg.m2),
+            .groups = "drop") %>% 
+  group_by(Bioregion, ) %>% 
+  summarise(Abun.Mean = mean(Total.Abundance),
+            Abun.SD = sd(Total.Abundance), 
+            Biom.Mean = mean(Total.Biomass),
+            Biom.SD = sd(Total.Biomass), 
+            N = n(),
+            .groups = "drop") %>% 
+  mutate(Abundance.Total = paste(round(Abun.Mean,0),"\u00b1",round(Abun.SD,0)),
+         Biomass.Total = paste(round(Biom.Mean,0),"\u00b1",round(Biom.SD,0))) %>% 
+  select(Bioregion, Abundance.Total, Biomass.Total) %>% 
+  pivot_longer(cols = c("Abundance.Total","Biomass.Total"),
+               names_to = "Metric") %>% 
+  pivot_wider(names_from = Bioregion, values_from = value)
+  
+zoop.bc.sum.table <- bind_rows(zoop.bc.total,zoop.bc.sum.table) %>% 
+  relocate(Metric, fungrp)
+
+
+# # Export table for annotation in excel.
+# write.csv(zoop.bc.sum.table,
+#           file = here("tables/bioregion_fg_means_to_annotate_20240704.csv"), row.names = FALSE)
+
+```
+
+
+## Relative abundance and biomass
+```{r}
+# As violin plots
+g1 <- ggplot(zoop.bc.fun.zeros, aes(x = Bioregion, y = Percent.Abundance, 
+                              fill = Bioregion)) +
+  geom_violin(aes(color = Bioregion), alpha = 0.6) + 
+  geom_boxplot(width = 0.2, color = "grey25", outlier.shape = NA) +
+  # stat_summary(fun = "mean", geom = "crossbar", width = 0.5,
+  #              colour = "black") +
+  xlab("") +
+  ylab("Percent Abundance") +
+  theme(legend.position = "none",  axis.title.y = element_markdown(),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) +
+  # scale_y_continuous(trans = "log10", 
+  #                    breaks = c(0.001,0.01,0.1,1,10,100,1000,10000,100000,1000000),
+  #                    labels = c("10^-3","10^-2","10^-1","10^0","10^1",
+  #                               "10^2","10^3","10^4","10^5","10^6")) +
+  facet_wrap(~fungrp,  nrow = 1) +
+  ggh4x::facet_wrap2(~fungrp, nrow = 1, strip = strip_fg)
+
+g2 <- ggplot(zoop.bc.fun.zeros, aes(x = Bioregion, y = Percent.Biomass, 
+                              fill = Bioregion)) +
+  geom_violin(aes(color = Bioregion), alpha = 0.6) + 
+  geom_boxplot(width = 0.2, color = "grey25", outlier.shape = NA) +
+  # stat_summary(fun = "mean", geom = "crossbar", width = 0.5,
+  #              colour = "black") +
+  xlab("") +
+  ylab("Percent Biomass") +
+  theme(legend.position = "none",  axis.title.y = element_markdown(),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) +
+  # scale_y_continuous(trans = "log10", 
+  #                    breaks = c(0.001,0.01,0.1,1,10,100,1000,10000,100000,1000000),
+  #                    labels = c("10^-3","10^-2","10^-1","10^0","10^1",
+  #                               "10^2","10^3","10^4","10^5","10^6")) +
+  facet_wrap(~fungrp,  nrow = 1) +
+  ggh4x::facet_wrap2(~fungrp, nrow = 1, strip = strip_fg)
+
+legend_b <- get_legend(g1 +    
+                         guides(color = guide_legend(nrow = 1)) +
+                         theme(legend.position = "bottom"))
+
+plot_grid(plot_grid(g1, g2, labels = "auto", ncol = 1), 
+          legend_b, nrow = 2, rel_heights = c(1,0.05))
+
+
+# ggsave(filename = here("figures/fig_violin_percent_contribution_region.png"),
+# width = 10, height= 5, units = "in", dpi = 600, bg = "white")
+
+
+
+# As stacked bar plots
+zbs.sum <- zoop.bc.sum %>% 
+  filter(Metric %in% c("Percent.Abundance",
+                       "Percent.Biomass")) %>% 
+  mutate(Metric = if_else(Metric == "Percent.Abundance",
+                 "% Abundance", "% Biomass")) %>% 
+  mutate(fungrp = as.factor(fungrp))
+  
+
+ggplot(zbs.sum, aes(y = ValMean, x = Bioregion, 
+                     fill = fungrp)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_fill_manual(values = fungrp.colors, 
+                    name = "Functional\ngroup") +
+  scale_y_continuous(expand = c(0, 0),
+                  labels = c("0.00" = "0%","0.25" = "25%",
+                             "0.50" = "50%", "0.75" = "75%", "1.00" = "100%")) +
+  facet_wrap(~Metric) 
+
+
+# ggsave(filename = here("figures/fig_bar_percent_contribution_region.png"),
+# width = 7, height= 4, units = "in", dpi = 600, bg = "white")
+
+```
+
+## Plot as treemap for summary figure 9
+```{r}
+# install.packages("treemapify")
+# library(treemapify)
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Biomass") %>% 
+         filter(Bioregion == "Offshore"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_biomass_offshore.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Biomass") %>% 
+         filter(Bioregion == "DeepShelf"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+
+ggsave(filename = here("figures/fig9/treemap_biomass_deepshelf.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Biomass") %>% 
+         filter(Bioregion == "Nearshore"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_biomass_nearshore.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Biomass") %>% 
+         filter(Bioregion == "DeepFjord"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_biomass_deepfjord.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Abundance") %>% 
+         filter(Bioregion == "DeepFjord"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_abundance_deepfjord.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Abundance") %>% 
+         filter(Bioregion == "Nearshore"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_abundance_nearshore.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Abundance") %>% 
+         filter(Bioregion == "DeepShelf"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_abundance_deepshelf.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+
+
+ggplot(zoop.bc.sum %>% 
+         filter(Metric == "Percent.Abundance") %>% 
+         filter(Bioregion == "Offshore"), 
+       aes(area = ValMean, fill = as.factor(fungrp))) +
+  treemapify::geom_treemap(color = "white") +
+  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
+                                colour = "white") +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = fungrp.colors) +
+  theme(legend.position = "none")
+
+ggsave(filename = here("figures/fig9/treemap_abundance_offshore.png"),
+width = 4, height= 4, units = "in", dpi = 600, bg = "white")
+```
+
+
+# 5. Significance tests
+## Sig diff test Overall
+```{r}
+# Overall total
+zoop.bc.total <- zoop.bc.fun.zeros %>% 
+  group_by(Key, Bioregion) %>% 
+  summarise(Total.Abundance = sum(Abundance.m2),
+            Total.Biomass = sum(Biomass.mg.m2),
+            .groups = "drop")
+kruskal.test(Total.Abundance ~ Bioregion, data = zoop.bc.total)
+kruskal.test(Total.Biomass ~ Bioregion, data = zoop.bc.total)
+
+dunn.test::dunn.test(x=zoop.bc.total$Total.Abundance, 
+                     g =zoop.bc.total$Bioregion, 
+                     method = "bh", alpha = 0.001)
+
+dunn.test::dunn.test(x=zoop.bc.total$Total.Biomass, 
+                     g =zoop.bc.total$Bioregion, 
+                     method = "bh", alpha = 0.001)
+```
+
+
+## Sig diff test Total
+```{r, eval=FALSE}
+library(broom)
+
+colnames(zoop.bc.fun.zeros)
+
+# Pivot wider to apply tests to every columns
+fun.biom <- zoop.bc.fun.zeros %>% 
+  # mutate(Biomass.mg.m3 = log1p(Biomass.mg.m3)) %>% 
+  select(Key, Bioregion, fungrp, Biomass.mg.m2) %>% 
+  pivot_wider(names_from = fungrp, values_from = Biomass.mg.m2, 
+              values_fill = NA) %>% 
+  column_to_rownames("Key")
+fun.abun <- zoop.bc.fun.zeros %>% 
+  # mutate(Abundance.m3 = log1p(Abundance.m3)) %>% 
+  select(Key, Bioregion, fungrp, Abundance.m2) %>% 
+  pivot_wider(names_from = fungrp, values_from = Abundance.m2, 
+              values_fill = NA) %>% 
+  column_to_rownames("Key")
+
+# presence of functional groups in each bioregion
+fun.pres <- zoop.bc.fun.zeros %>% 
+  select(Key, Bioregion, fungrp, Biomass.mg.m2) %>% 
+  filter(!is.na(Biomass.mg.m2)) %>% 
+  group_by(fungrp) %>% 
+  count()
+
+# KW test per functional group
+fun.biom.kw <- fun.biom %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+
+fun.abun.kw <- fun.abun %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+
+
+# post-hoc dunn test
+fun.biom.dun <- fun.biom %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005)
+fun.abun.dun <- fun.abun %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005)
+
+save(fun.biom.kw, fun.abun.kw,
+     fun.biom.dun, fun.abun.dun,
+     file = here("data/abundance_biomass_kw_dunn_results_m2_N3721_20240704.RData"))
+
+```
+
+## Sig diff test Percent
+```{r, eval=FALSE}
+
+# Pivot wider to apply tests to every columns
+fun.biom.perc <- zoop.bc.fun.zeros %>% 
+  select(Key, Bioregion, fungrp, Percent.Biomass) %>% 
+  pivot_wider(names_from = fungrp, values_from = Percent.Biomass, 
+              values_fill = NA) %>% 
+  column_to_rownames("Key")
+
+fun.abun.perc <- zoop.bc.fun.zeros %>% 
+  select(Key, Bioregion, fungrp, Percent.Abundance) %>% 
+  pivot_wider(names_from = fungrp, values_from = Percent.Abundance, 
+              values_fill = NA) %>% 
+  column_to_rownames("Key")
+
+
+# KW test per functional group
+fun.biom.perc.kw <- fun.biom.perc %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+
+fun.abun.perc.kw <- fun.abun.perc %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+
+
+# post-hoc dunn test
+fun.biom.perc.dun <- fun.biom.perc %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005)
+
+fun.abun.perc.dun <- fun.abun.perc %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005)
+
+save(fun.biom.perc.kw, fun.abun.perc.kw,
+     fun.biom.perc.dun, fun.abun.perc.dun,
+     file = here("data/abundance_biomass_percent_kw_dunn_results_m2_N3721_20240704.RData"))
+
+# Most common similarities between functional groups
+dunn.sum <- bind_rows(fun.abun.dun, fun.biom.dun,
+                      fun.abun.perc.dun, fun.biom.perc.dun) %>% 
+  group_by(comparisons) %>% 
+  summarise(n = n(), .groups = "drop") %>% 
+  arrange(-n)
+```
+
+

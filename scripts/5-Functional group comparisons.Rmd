@@ -1,0 +1,394 @@
+---
+title: "Functional group analysis"
+author: "Patrick Pata"
+date: "2023-10-24"
+output: html_document
+---
+
+This file identifies the functional groups based on a cluster analysis of the gawdis dissimilarity between 8 traits. Figures exploring how the functional groups are projected in the trait space and the relationship of the other traits not used in the gawdis analysis to the trait space are generated. 
+
+Additionally: 
+- The significant differences in the means and ranges of trait values are compared between functional groups. 
+- The proportion of functional groups to each of the association groups in Pata et al. (2022) are visualized.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(here)
+library(cowplot)
+library(scales)
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+
+theme_set(theme_bw())
+
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+
+load(here("data/functional_grouping_results_20240617.RData"))
+
+# Load a dataframe of merging the dendrogram at different levels
+fg.merge <- read.csv(here("data/fg_cluster_merge.csv")) %>%
+  rename(fungrp = fungrp10)
+```
+
+# 2. Create table of trait value averages between functional groups
+```{r}
+# Create table of species and numeric traits by functional grouo
+sp.fg.num <- od.revised %>%
+  select(Species, fungrp) %>%
+  left_join(traits.num, 
+            by = "Species") %>% 
+  mutate(fungrp = paste0("FG",fungrp)) %>% 
+  mutate(fungrp = factor(fungrp, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                            "FG6","FG7","FG8","FG9","FG10"))) %>% 
+  arrange(fungrp)
+
+# Longer dataframe
+fungrp.num <- sp.fg.num %>% 
+  pivot_longer(cols = -c(Species, fungrp), 
+               names_to = "traitName", values_to = "traitValue") 
+
+
+# Calculate mean, sd, median, and range for numeric traits
+fg.traits.sum <- sp.fg.num %>% 
+  pivot_longer(cols = -c(Species, fungrp),
+               names_to = "traitName",
+               values_to = "traitValue") %>% 
+  group_by(fungrp, traitName) %>% 
+  summarise(traitMean = mean(traitValue),
+            traitSD = sd(traitValue),
+            traitMedian = median(traitValue),
+            traitIQR = IQR(traitValue),
+            traitMin = min(traitValue),
+            traitMax = max(traitValue),
+            traitN = n(),
+            .groups = "drop") %>% 
+  arrange(traitName, fungrp)
+
+# Export table of functional group by summary values, sectioned by traits. This will be annotated in excel.
+write.csv(fg.traits.sum,
+          file = here("tables/fg_traits_to_annotate.csv"), row.names = FALSE)
+
+```
+
+# 3. Calculate significant difference in trait values between functional groups
+Note that the Dunns test will print out long outputs
+```{r, eval=FALSE}
+# Compare trait distributions between functional groups
+library(broom)
+
+# KW test comparing functional groups for each trait
+fg.kw <- fungrp.num %>% 
+  select(traitValue, traitName, fungrp) %>% 
+  group_by(traitName) %>%
+  do(tidy(kruskal.test(x=.$traitValue, g =.$fungrp))) %>% 
+  mutate(fg.cluster = "FG10")
+
+
+# Pairs of functional groups with significant difference based on Dunn test
+fg.dun <- fungrp.num %>% 
+  select(traitValue, traitName, fungrp) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.0005) %>% 
+  mutate(fg.cluster = "FG10")
+
+# Load a dataframe of merging the dendrogram at different levels
+fg.merge <- read.csv(here("data/fg_cluster_merge.csv")) %>% 
+  rename(fungrp = fungrp10)
+
+# Group functional groups into merged groups
+fungrp.num.2 <- fungrp.num %>% 
+  left_join(fg.merge, by = "fungrp")
+
+# It is only at the 2- and 3-cluster solutions when some traits return no significant difference between clusters
+fg.kw.sub.3 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp3) %>% 
+  group_by(traitName) %>%
+  do(tidy(kruskal.test(x=.$traitValue, g =.$fungrp3))) %>% 
+  filter(p.value < 0.05) %>% 
+  arrange(-p.value) %>% 
+  mutate(fg.cluster = "FG3")
+
+# For 2-cluster solution, no need for Dunn test
+fg.kw.sub.2 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp2) %>% 
+  group_by(traitName) %>%
+  do(tidy(kruskal.test(x=.$traitValue, g =.$fungrp2))) %>% 
+  filter(p.value < 0.05) %>% 
+  arrange(-p.value) %>% 
+  mutate(fg.cluster = "FG2")
+
+
+
+# Go through Dunn test for each level of clustering and rerun these tests
+# Note that p.adjusted < 0.05 is retained here for reference but significant difference is really p < alpha/2
+fg.dun.sub.3 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp3) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp3, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG3")
+
+fg.dun.sub.4 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp4) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp4, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG4")
+
+fg.dun.sub.5 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp5) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp5, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG5")
+
+fg.dun.sub.6 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp6) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp6, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG6")
+
+fg.dun.sub.7 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp7) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp7, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG7")
+
+fg.dun.sub.8 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp8) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp8, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG8")
+
+fg.dun.sub.9 <- fungrp.num.2 %>% 
+  select(traitValue, traitName, fungrp9) %>% 
+  group_by(traitName) %>%
+  do(as.data.frame(dunn.test::dunn.test(x=.$traitValue, g =.$fungrp9, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted < 0.05) %>% 
+  arrange(-P.adjusted) %>% 
+  mutate(fg.cluster = "FG9")
+
+fg.comp.kw.res <- bind_rows(
+  fg.kw, fg.kw.sub.2, fg.kw.sub.3
+)
+
+fg.comp.dunn.res <- bind_rows(
+  fg.dun, fg.dun.sub.9, fg.dun.sub.8, fg.dun.sub.7,
+  fg.dun.sub.6, fg.dun.sub.5, fg.dun.sub.4, fg.dun.sub.3
+)
+
+save(fg.comp.kw.res, fg.comp.dunn.res,
+     file = here("data/fg_comparison_kwdunn_results.RData"))
+
+```
+
+# 4. Plot results of KW and Dunn tests
+```{r, warning=FALSE, fig.width=6}
+# fg.comp.kw.res contains the overall fg KW and the 2- and 3-cluster solutions which have some no significant differences
+# fg.com.dunn.res contains the Dunn test results with p-values < 0.05, although the significantly different pairs are those with p < alpha/2 (which is 0.0005).
+load(here("data/fg_comparison_kwdunn_results.RData"))
+
+# Select the main 10-cluster grouping
+fg.comp.kw <- fg.comp.kw.res %>% 
+  filter(fg.cluster == "FG10")
+
+fg.comp.dunn <- fg.comp.dunn.res %>% 
+  ungroup() %>% 
+  filter(fg.cluster == "FG10") %>% 
+  filter(P.adjusted < 0.0005) %>% 
+  select(-fg.cluster) %>% 
+  separate_wider_delim(cols = comparisons, delim = " - ",
+                       names = c("FG.A","FG.B")) %>% 
+  mutate(FG.A = factor(FG.A, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                        "FG6","FG7","FG8","FG9","FG10"))) %>% 
+  mutate(FG.B = factor(FG.B, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                        "FG6","FG7","FG8","FG9","FG10")))
+# Flip the instances when FG.A=10 to make all points all in one side of the triangle
+fg.comp.dunn.1 <- fg.comp.dunn %>% 
+  filter(FG.A != "FG10")
+fg.comp.dunn.2 <- fg.comp.dunn %>% 
+  filter(FG.A == "FG10") %>% 
+  rename(FG.A = "FG.B", FG.B = "FG.A")
+fg.comp.dunn <- bind_rows(fg.comp.dunn.1, fg.comp.dunn.2)
+rm(fg.comp.dunn.1, fg.comp.dunn.2)
+
+# Plot matrix of significant differences between functional group per trait
+baseplot <- data.frame(FG.A = c("FG1","FG2","FG3","FG4","FG5",
+                                "FG6","FG7","FG8","FG9","FG10")) %>%
+  mutate(FG.A = factor(FG.A, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                        "FG6","FG7","FG8","FG9","FG10"))) %>% 
+  mutate(FG.B = FG.A)
+
+# Create a list of ggplots to selectively transform axes
+traitplots <- vector("list",2)
+count <- 1
+tname_label = c("Water content","Body length","Dry weight","Carbon weight",
+                "Ws. respiration rate","Ws. clearance rate",
+                "Ws. excretion rate ammonia","Ws. excretion rate phosphate",
+                "Ind. respiration rate","Ind. clearance rate",
+                "Ind.excretion rate ammonia","Ind. excretion rate phosphate",
+                "Nitrogen weight","Carbon content",
+                "Nitrogen content","Phosphorus content",
+                "Phosphorus weight","C:N","N:P","C:P")
+
+for (tname in c("waterPWW","bodyLength","dryWeight","carbonWeight",
+                "respirationRate_WSC", "clearanceRate_WSC",
+                "excretionRateN_WSDW","excretionRateP_WSDW",
+                "respirationRate","clearanceRate",
+                "excretionRateN","excretionRateP",
+                "nitrogenWeight","carbonPDW","nitrogenPDW","phosphorusPDW",
+                "phosphorusWeight","ratioCN","ratioNP","ratioCP")) {
+  traitplots[[count]] <- ggplot(baseplot, aes(x = FG.A, y = FG.B)) +
+    geom_point(size = 0, shape = 3, color = "gray90") + 
+    geom_point(data = fg.comp.dunn %>% 
+                 filter(traitName == tname), 
+               size = 3) +
+    theme(axis.text.x = element_text(size = 12, face = "bold",
+                                     color = fungrp.colors,
+                                     angle = 45, vjust = 1, hjust=1),
+          axis.text.y = element_text(size = 12, face = "bold",
+                                     color = rev(fungrp.colors)),
+          axis.title = element_blank(),
+          plot.title = element_text(size = 10, face = "bold")) +
+    scale_y_discrete(limits = rev) +
+    ggtitle(tname_label[count]) 
+  count <- count + 1
+}
+
+p.traits <- plot_grid(plotlist=traitplots, ncol = 4, labels = "auto")
+
+# The number of traits that are significantly different between functional groups
+fg.comp.dunn.sum <- fg.comp.dunn %>% 
+  group_by(FG.A, FG.B) %>% 
+  summarise(ntraits = n(),
+            .groups = "drop")
+
+p.overall <- ggplot(baseplot, aes(x = FG.A, y = FG.B)) +
+  geom_point(size = 0, shape = 3, color = "gray90") + 
+  geom_point(data = fg.comp.dunn.sum, 
+             aes(size = ntraits)) +
+  guides(size = guide_legend(title = 
+                               "Number of\nsignificantly\ndifferent traits")) +
+  theme(legend.position = "right",
+        axis.text.x = element_text(size = 12, face = "bold",
+                                   color = fungrp.colors),
+        axis.text.y = element_text(size = 12, face = "bold",
+                                   color = rev(fungrp.colors)),
+        axis.title = element_blank(),
+        plot.margin = margin(0.2,4,0.2,5, "cm")) +
+    scale_y_discrete(limits = rev) 
+
+plot_grid(p.traits, p.overall,
+          ncol = 1, rel_heights = c(5,1.3),
+          labels = c("","u"))
+
+ggsave(file = here("figures/fig_s7__fungrps_sigdiff_dunn.png"),
+       height = 16, width = 12, dpi = 300)
+
+```
+
+
+# 5. Comparing functional groups with association groups
+```{r, eval=FALSE}
+# Load list of association groups
+#    Assoc group dataframe is sp.table from Pata et al. (2022; PinO)
+load(here("data/Assoc_group_kendallresults_11022021.RData"))
+
+# Match with functional groups
+assoc.fg <- sp.table %>% 
+  select(Species, AssocGroup, AssocGroup.sub) %>% 
+  left_join(select(pcoa.vec, Species, fungrp, majorgroup),
+            by = "Species") %>% 
+  mutate(fungrp = if_else(is.na(fungrp), "no group", fungrp))
+
+# view(assoc.fg %>% 
+#        filter(is.na(fungrp)))
+# assoc.fg.tab <- table(assoc.fg$AssocGroup, assoc.fg$fungrp)
+
+assoc.fg.tab <- assoc.fg %>% 
+  select(AssocGroup, fungrp) %>% 
+  group_by(AssocGroup, fungrp) %>% 
+  mutate(nspecies = n()) %>% 
+  ungroup() %>% 
+  distinct() %>% 
+  mutate(fungrp = factor(fungrp, levels = c("FG1","FG2","FG3","FG4","FG5",
+                                            "FG6","FG7","FG8","FG9","FG10",
+                                            "no group"))) 
+
+assoc.fg.tab.totals <- assoc.fg.tab %>% 
+  group_by(AssocGroup) %>% 
+  mutate(totalNG = sum(nspecies)) %>% 
+  ungroup() %>% 
+  filter(fungrp != "no group") %>% 
+  group_by(AssocGroup) %>% 
+  mutate(totalFG = sum(nspecies)) %>% 
+  ungroup() %>% 
+  distinct(AssocGroup, totalNG, totalFG)
+
+assoc.fg.tab <- assoc.fg.tab %>% 
+  left_join(assoc.fg.tab.totals) %>% 
+  mutate(AGlab1 = paste0(AssocGroup, '\nN = ', totalNG),
+         AGlab2 = paste0(AssocGroup, '\nN = ', totalFG))
+  
+# Plot
+ggplot(assoc.fg.tab,
+             aes(x = nspecies, y = AGlab1, fill = fungrp)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_x_reverse(position = "bottom", expand = c(0, 0),
+                  labels = c("0.00" = "1","0.25" = "0.75",
+                             "0.50" = "0.50", "0.75" = "0.25", "1.00" = "0")) +
+  ylab("Association Group") + xlab("Proportion") +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual("Functional Group",
+    values = c(fungrp.colors,"cornsilk3")) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme(legend.position = "top", legend.justification = c(0,1),
+        legend.margin=margin(0,0,0,0), legend.box.margin=margin(0,0,0,-10))
+
+# ggsave(filename = here("figures/extra_assoc_fun_group_match.png"),
+#     width = 8, height= 4, units = "in", dpi = 600, bg = "white")
+
+
+# Plot version 2 without "no group" species
+ggplot(assoc.fg.tab %>% filter(fungrp != "no group"),
+             aes(x = nspecies, y = AGlab2, fill = fungrp)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_x_reverse(position = "bottom", expand = c(0, 0),
+                  labels = c("0.00" = "1","0.25" = "0.75",
+                             "0.50" = "0.50", "0.75" = "0.25", "1.00" = "0")) +
+  ylab("Association Group") + xlab("Proportion") +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual("Functional Group",
+    values = c(fungrp.colors,"cornsilk3")) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme(legend.position = "top", legend.justification = c(0,1),
+        legend.margin=margin(0,0,0,0), legend.box.margin=margin(0,0,0,-10))
+
+# ggsave(filename = here("figures/extra_assoc_fun_group_match_v2.png"),
+#     width = 8, height= 4, units = "in", dpi = 600, bg = "white")
+```
+

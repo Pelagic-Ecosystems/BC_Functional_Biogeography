@@ -1,0 +1,500 @@
+---
+title: "Subset the trait database"
+author: "Patrick Pata"
+date: "2023-10-27"
+output: html_document
+---
+
+This file subsets the zooplankton trait database for relevant traits required in the analysis of the associated manuscript. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the trait database changes, please uncomment the data saving scripts in lines 270 and 498. 
+
+This will be based on Level 1 trait data. New information can be added to this without having to overhaul the trait database.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries, functions, and data
+```{r}
+library(tidyverse)
+library(here)
+library(scales)
+library(cowplot)
+library(arsenal) # for the summary table
+
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+theme_set(theme_bw())
+
+
+mg.exclude <- c("Cladoceran","Cubozoan","Scyphomedusae","Decapod")
+
+
+# * FUNCTIONS * 
+# source(here("functions/toolkit_database.R"))
+standard_temp <- function(rate0, t0, t = 15, Q10 = 2.8) {
+  10^(log10(rate0) + log10(Q10)*((t-t0)/10) )
+}
+# Calculate the weighted means and SDs of traits when the dataset is a mix of 
+#   individual values and averaged records.
+getSpeciesMeanSD <- function(traitValue, dispersionSD, individualCount){
+  # extract indiv values and grouped values
+  val.indiv <- traitValue[which(individualCount == 1)]
+  val.group.mean <- traitValue[which(individualCount > 1)]
+  val.group.N <- individualCount[which(individualCount > 1)]
+  val.group.sd <- dispersionSD[which(individualCount > 1)]
+  # calculate mean of the individual values
+  val.indiv.mean <- mean(val.indiv)
+  val.indiv.N <- length(val.indiv)
+  val.indiv.sd <- sd(val.indiv, na.rm = TRUE)
+  
+  # calculate N
+  N <- sum(individualCount)
+  # calculate weighted mean
+  mean <- weighted.mean(c(val.indiv.mean, val.group.mean),
+                        c(val.indiv.N, val.group.N))
+  # calculate pooled sd
+  if (val.indiv.N == 1) {
+    sd <- pooled.sd(c(val.group.sd),
+                    c(val.group.N))
+  } else {
+    sd <- pooled.sd(c(val.indiv.sd, val.group.sd),
+                    c(val.indiv.N, val.group.N))
+  }
+  # calculate standard error
+  se <- sd / sqrt(N)
+  
+  return(list("N" = N, "mean" = mean, "sd" = sd, "se" = se))
+}
+
+# pooled sd
+pooled.sd <- function(SDarray, Narray){
+  sqrt(sum((Narray-1)*(SDarray)^2) / (sum(Narray) - length(Narray)) )
+  # # if inputs are: x,y,Nx,Ny
+  # sqrt( ((Nx-1)*x^2 + (Ny-1)*y^2) / (Nx+Ny-2))
+}
+
+cleanStrings <- function(A){
+  A <- str_split(A, pattern =";", simplify = TRUE) 
+  A <- str_trim(A)
+  A <- sort(A)
+  A <- str_replace(A, "NA", replacement = "")
+  A <- A[A != '']
+  A <- unique(as.list(A))
+  A <- paste(A, collapse = "; ")
+  A <- as.character(A)
+}
+```
+
+# 2. Prepare data
+```{r, eval=TRUE}
+# Taxonomy table
+taxonomy <- read.csv(here("data/trait_database_raw/taxonomy_table_20230628.csv")) %>% 
+  distinct(taxonID, .keep_all = TRUE)
+
+trait.list <- c("bodyLength","carbonWeight","dryWeight","wetWeight",
+                "waterPWW","carbonPDW","nitrogenPDW","phosphorusPDW",
+                "nitrogenTotal","phosphorusTotal",
+                "ratioCN","ratioCP","ratioNP",
+                "respirationRate_15C","respirationRate_WSC_15C",
+                "excretionRateN_15C","excretionRateN_WSDW_15C",
+                "excretionRateP_15C","excretionRateP_WSDW_15C",
+                "clearanceRate_15C","clearanceRate_WSC_15C",
+                "feedingMode","reproductionMode","trophicGroup")
+
+# Original level 1 
+lvl1 <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.csv")) %>% 
+  filter(traitName %in% trait.list) %>% 
+  filter(valueType == "numeric") %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # filter(majorgroup %notin% mg.exclude) %>% 
+  
+  # ** Manual curation **
+  
+  # Remove the records of Gigantocypris muelleri because this is the only species with phosphate composition for ostracods which is anomalously high in the analysis and the nitrogen composition is also anomalously high compared to the other ostracods - making estimates of stoichiometry and excretion rates for this species not representative of ostracoda in this analysis.
+  filter(scientificName != "Gigantocypris muelleri") %>% 
+  # Exclude the Clio pyramidata excretion rates which were observed for Clio sulcuta and measured at <0 degC in the Antarctic resulting in  high values when standardized to 8.5degC. The total N and P values are also very high.
+  filter(!(scientificName == "Clio pyramidata" & 
+             traitName %in% c("excretionRateN_15C","excretionRateN_WSDW_15C",
+                              "excretionRateP_15C","excretionRateP_WSDW_15C",
+                              "nitrogenTotal", "phosphorusTotal"))) %>% 
+  # Exclude the carbon weight of "Euphilomedes producta" because it is 4 orders of magnitude  smaller compared to the carbon weight of Euphilomedes interpuncta which has more trait data. This results in an erroneous calculated WSC respiration rate that is 3 orders of magnitude greater than any organism.
+  filter(!(scientificName == "Euphilomedes producta" & traitName == "carbonWeight")) %>% 
+  filter(!(scientificName == "Mysida" & traitName == "carbonWeight")) %>% # very low carbon weights
+  filter(!(scientificName == "Clytia" & traitName == "nitrogenPDW")) %>% # value too high when most species have low values
+  filter(!(scientificName == "Rathkea octopunctata" & traitName == "nitrogenPDW" 
+           & primaryReference == "Matsakis1999")) %>% 
+  filter(!(scientificName == "Acartia" & traitName == "phosphorusPDW")) %>% 
+  # exclude some very high C:N records which are beyond the range for similar taxa
+  filter(catalogNumber %notin% c("38-5223-4","38-2654-1",
+                                 "38-630-14","38-630-31")) %>% 
+  # exclude clearance rates for appendicularians, will be added back later
+  filter(!(majorgroup == "Appendicularian" & 
+           traitName %in% c("clearanceRate_15C"))) %>% 
+  # exclude clearance rates for Tortanus (Boreotortanus) discaudatus which is a magnitude higher than other Tortanus values
+  filter(!(scientificName == "Tortanus (Boreotortanus) discaudatus" &
+             traitName %in% c("clearanceRate_15C","clearanceRate_WSC_15C"))) 
+# convert dryWeightPWW to waterPWW
+lvl1.dwww <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.csv")) %>% 
+  filter(traitName == "dryWeightPWW") %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  mutate(traitName = "waterPWW", traitID = 19,
+         traitValue = 100-traitValue,
+         basisOfRecord = "derived from dryWeightPWW")
+
+# Original level 1 excluded
+lvl1.ex <- read.csv(here("data/trait_database_raw/trait_dataset_level1_excluded-2023-08-15.csv")) %>% 
+  filter(valueType == "numeric") %>% 
+  filter(traitName %in% trait.list) %>% 
+  # filter(traitName %in% c())
+  filter(traitName != "bodyLength") %>% 
+  filter(stageID %notin% c(23:37,46)) %>% 
+  filter(lifeStage %notin% c("larvae","calyptopsis","furcilia","egg",
+                             "trophozooid","juvenile")) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+    # anomalous values
+    filter(catalogNumber %notin% c("16-3559-1","23-630-53","28-3025-63",
+                                   "31-637-22","31-1423-6")) %>% 
+  filter(exclusionType != "duplicate")
+
+
+# *** New data ***
+
+# Updated clearance rates for appendicularians + data on thaliaceans and thecosomes
+new.clearance <- read.csv(here("data/new_trait_info/level1_appendicularian_clearance_rate_updated.csv")) %>% 
+  select(-c(taxonID)) %>% 
+  left_join(distinct(taxonomy,scientificName, taxonID, phylum, class, order, 
+                     family, genus, acceptedNameUsageID, acceptedNameUsage,
+                     taxonRank, taxonRankID, aphiaID),
+            by = "scientificName") %>% 
+  # Standardize to 15 degC
+  mutate(traitValue = standard_temp(traitValue, assocTemperature,
+                                    t = 15, Q10 = 2.8),
+         traitName = paste0(traitName,"_15C"),
+         assocTemperature = "15", 
+         verbatimTemperature = as.character(verbatimTemperature)) 
+
+# New composition data 
+new.composition <- read.csv(here("data/new_trait_info/Gorsky1988a.csv")) %>% 
+  left_join(distinct(taxonomy,taxonID, taxonID, phylum, class, order, 
+                     family, genus, acceptedNameUsage,
+                     taxonRank, taxonRankID),
+            by = "taxonID") %>% 
+  mutate(verbatimTraitValue = as.character(verbatimTraitValue))
+
+# The TorresBailey2022 Respiration rates as weight-specific WW
+new.respWW <- read.csv(here("data/new_trait_info/TorresBailey2022_RespirationRates.csv")) %>% 
+  filter(!is.na(sizeAssocValue)) %>% 
+  # convert size from g to mg WW
+  mutate(sizeAssocValue = sizeAssocValue * 1000,
+         sizeAssocUnit = "mg") %>% 
+  # convert rate from wet-weight specific to individual rate
+  mutate(traitValue = traitValue * sizeAssocValue,
+         traitUnit = "ul O2 h^-1",
+         traitName = "respirationRate") %>% 
+  # standardize to 8.5 degC
+  mutate(traitValue = standard_temp(traitValue, t0 = traitValueTemperature, 
+                                    t = 8.5, Q10 = 2.8),
+         traitValueTemperature = 8.5) %>% 
+  # exclude very smal values likely because wet weight is wrong
+  filter(traitValue > 0.05) %>% 
+  mutate(verbatimTraitValue = as.character(verbatimTraitValue),
+         verbatimTemperature = as.character(verbatimTemperature))
+
+# *** Combine all data and export ***
+traits.lvl1 <- bind_rows(lvl1, lvl1.ex, lvl1.dwww,
+                         new.clearance, new.composition, new.respWW) %>% 
+  select(catalogNumber, taxonID, scientificName, traitName, traitValue,
+         traitUnit, lifeStage, assocTemperature, individualCount, dispersionSD,
+         sizeAssocName, sizeAssocUnit, sizeAssocValue, sizeType,
+         primaryReference, secondaryReference, basisOfRecord,
+         taxonRank, phylum, class, order, family, genus, majorgroup) %>% 
+  filter(majorgroup %notin% c("Cubozoan","Cladoceran")) %>%
+  
+  
+  # Update rates to standard temperature of 8.5 degC
+  mutate(assocTemperature = if_else(grepl("_15C", traitName),
+                                    "8.5",assocTemperature)) %>% 
+  mutate(traitName = str_remove(traitName,"_15C")) %>% 
+  mutate(traitValue = if_else(grepl("respiration|clearance",traitName),
+                              standard_temp(traitValue, t0 = 15, 
+                                            t = 8.5, Q10 = 2.8),
+                              traitValue)) %>% 
+  mutate(traitValue = if_else(grepl("excretionRateN",traitName),
+                              standard_temp(traitValue, t0 = 15, 
+                                            t = 8.5, Q10 = 2.0),
+                              traitValue)) %>% 
+  mutate(traitValue = if_else(grepl("excretionRateP",traitName),
+                              standard_temp(traitValue, t0 = 15, 
+                                            t = 8.5, Q10 = 1.55),
+                              traitValue)) %>% 
+  
+
+  # rename nitrogen and phosphorus weight
+  mutate(traitName = str_replace(traitName,"Total","Weight")) %>% 
+  # Set factor levels
+  mutate(majorgroup = 
+           factor(majorgroup, 
+                  levels = c("Appendicularian","Non-calanoid","Calanoid",
+                             "Ostracod","Mysid","Amphipod", "Euphausiid",
+                             "Polychaete","Pteropod","Chaetognath",
+                             "Hydromedusae","Siphonophore","Thaliacean",
+                             "Ctenophore","Scyphomedusae","Decapod")),
+         traitName = 
+           factor(traitName, 
+                  levels = c("bodyLength","dryWeight","wetWeight","waterPWW",
+                             "carbonWeight","nitrogenWeight","phosphorusWeight",
+                             "carbonPDW","nitrogenPDW","phosphorusPDW",
+                             "ratioCN","ratioCP","ratioNP",
+                             "respirationRate","respirationRate_WSC",
+                             "excretionRateN","excretionRateN_WSDW",
+                             "excretionRateP","excretionRateP_WSDW",
+                             "clearanceRate","clearanceRate_WSC")))
+
+
+trait.list <- str_remove(trait.list,"_15C")
+
+majorgroup.colors <- data.frame(
+  majorgroup = c("Appendicularian","Non-calanoid","Calanoid","Ostracod",
+                 "Mysid","Amphipod", "Euphausiid", "Polychaete","Pteropod",
+                 "Chaetognath", "Hydromedusae","Siphonophore",
+                 "Thaliacean","Ctenophore","Scyphomedusae","Decapod"),
+  color = c("violetred","dodgerblue","blue3","forestgreen",
+                       "seagreen3","slateblue1","cyan3","lightpink2","green2",
+                       "darkorchid4", "tan1","yellow2",
+                       "tomato1","red3","orange4","salmon3"))
+                       
+
+
+# rm(lvl1, lvl1.ex, new.clearance, new.composition, lvl1.dwww)
+
+# save(traits.lvl1, taxonomy, trait.list, majorgroup.colors,
+#      file = here("data/traits_level1_curated_20231027.RData"))
+```
+
+
+# 3. Create major group summary table and figures
+```{r, fig.width=6}
+# Summary table
+mg.table <- traits.lvl1 %>% 
+  group_by(traitName, majorgroup) %>% 
+  summarise(nobs = n(), nsp = length(unique(scientificName)),
+            tv.mean = mean(traitValue), tv.sd = sd(traitValue),
+            tv.min = min(traitValue), tv.max = max(traitValue),
+            .groups = "drop")
+
+# 
+# my_controls <- tableby.control(
+#   test = T,
+#   total = T,
+#   numeric.stats = c("N","meansd","range"),
+#   stats.labels = list(
+#     meansd = "Mean (SD)",
+#     range = "Min - Max",
+#     N = "Nrecords"),
+#   digits = 2
+# )
+# 
+# traits.lvl1.long <- traits.lvl1 %>% 
+#   select(majorgroup, traitName, traitValue) %>% 
+#   pivot_wider(names_from = traitName, values_from = traitValue) 
+#   
+# mg.table <- tableby(majorgroup ~ traitValue,
+#                     data = traits.lvl1 %>% filter(traitName == "carbonPDW"),
+#                     control = my_controls)
+# summary(mg.table)
+
+# Number of records and species
+ggplot(mg.table, aes(x = majorgroup, y = traitName)) +
+  geom_tile(aes(fill = nobs)) +
+  geom_text(aes(label = nsp), color = "black",) +
+  scale_y_discrete(limits = rev)+
+  scale_fill_distiller(limits = c(0,200), oob = scales::squish) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) 
+
+
+# ggsave(filename = here("figures/trait_distribution_numspecies.png"),
+#     width = 10, height= 8, units = "in", dpi = 300, bg = "white")
+
+
+# Distribution of data
+g1 <- ggplot(traits.lvl1 %>% filter(grepl("PDW|PWW|CP|NP|CN", traitName)), 
+       aes(x = majorgroup, y = traitValue, color = majorgroup)) +
+  geom_boxplot() +
+  scale_color_manual(values = majorgroup.colors$color, name = "major group") + 
+  theme(axis.text.x = element_blank(), axis.title.x = element_blank(),
+        legend.position = "none") +
+  facet_wrap(~traitName, scales = "free_y", ncol = 4)
+
+g2 <- ggplot(traits.lvl1 %>% filter(!grepl("PDW|PWW|CP|NP|CN", traitName)), 
+       aes(x = majorgroup, y = traitValue, color = majorgroup)) +
+  geom_boxplot() +
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+                labels = trans_format("log10", math_format(10^.x))) +
+  scale_color_manual(values = majorgroup.colors$color) + 
+  theme(axis.text.x = element_blank(),
+        legend.position = "none") +
+  facet_wrap(~traitName, scales = "free_y")
+
+legend_b1 <- get_legend( g1 + 
+                           guides(color = guide_legend(ncol = 1)) +
+                           theme(legend.position = "right"))
+
+plot_grid(plot_grid(g1, g2, ncol = 1, rel_heights = c(2,4)),
+          legend_b1, nrow = 1, rel_widths = c(10,1))
+
+# ggsave(filename = here("figures/extra_trait_distribution_level1.png"),
+#     width = 15, height= 10, units = "in", dpi = 300, bg = "white")
+```
+
+
+# 4. Species level data
+## Calculate species level averages
+These are weighted means when the N and sd were reported.
+```{r}
+# # The curated level 1 data based on the chunk above
+# load(here("data/traits_level1_curated_20231027.RData"))
+
+# Curate the body length data to use maximum length for copepods and for females when possible.
+A <- traits.lvl1 %>% 
+  filter(traitName == "bodyLength")
+
+# For copepods, select females and total length when possible
+A.1 <- A %>% 
+  filter(class == "Copepoda") %>% 
+  filter(lifeStage == "female" & sizeType == "total length")
+# females but not in total length
+A.2 <- A %>% 
+  filter(class == "Copepoda") %>% 
+  filter(taxonID %notin% A.1$taxonID) %>% 
+  filter(lifeStage == "female")
+
+# then select "adult"
+A.3 <- A %>% 
+  filter(taxonID %notin% A.1$taxonID) %>% 
+  filter(taxonID %notin% A.2$taxonID) %>% 
+  filter(lifeStage %in% c("adult"))
+
+# Get average for adults and females
+A.4 <- bind_rows(A.1, A.2, A.3) 
+
+# all taxa not in A.4
+trait.length <- A %>% 
+  filter(taxonID %notin% A.4$taxonID) %>% 
+  bind_rows(A.4)
+
+rm(A, A.1, A.2, A.3, A.4)
+
+
+traits.species <- traits.lvl1 %>% 
+  filter(traitName != "bodyLength") %>% 
+  # return the curated length information
+  bind_rows(trait.length) %>% 
+  
+  
+  # if N is NA or if sd is not reported, N = 1
+  mutate(individualCount = if_else(is.na(individualCount), 1, individualCount)) %>%
+  mutate(individualCount = if_else(is.na(dispersionSD), 1, individualCount)) %>% 
+  # calculate trait-taxon average
+  group_by(traitName, traitUnit, taxonID, scientificName) %>%  
+  # TODO: improve this mutate so it doesn't do the calculation thrice
+  summarise(nRecords = n(),
+         tvN = getSpeciesMeanSD(traitValue, dispersionSD, individualCount)$N,
+         tvSD = getSpeciesMeanSD(traitValue, dispersionSD, individualCount)$sd,
+         tvVal = getSpeciesMeanSD(traitValue, dispersionSD, individualCount)$mean,
+         .groups = "drop") %>%
+  mutate(traitValue = tvVal, individualCount = tvN, dispersionSD = tvSD,
+         basisOfRecord = "calculated taxon average") %>% 
+  dplyr::select(-c(tvVal, tvN, tvSD)) 
+```
+
+
+## Convert categorical traits to binary per species
+ Work on level 1 data
+```{r}
+trait.cat <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.csv")) %>% 
+  filter(traitName %in% c("trophicGroup","feedingMode","reproductionMode")) %>% 
+  # exclude some feeding modes that are not specified
+  filter(traitValue %notin% c("ambush","active","passive")) %>% 
+  group_by(traitID, taxonID) %>% 
+  mutate(traitValue = cleanStrings( paste(traitValue, collapse = "; ")) )%>% 
+  ungroup() 
+
+
+# Trophic group
+trait.TG <- trait.cat %>% 
+  filter(traitName == "trophicGroup") %>% 
+  mutate(TG.carnivore = if_else(grepl("carnivore",traitValue)==TRUE,1,0)) %>% 
+  mutate(TG.omnivore = if_else(grepl("omnivore",traitValue)==TRUE,1,0)) %>% 
+  mutate(TG.herbivore = if_else(grepl("herbivore",traitValue)==TRUE,1,0)) %>% 
+  mutate(TG.detritivore = if_else(grepl("detritivore",traitValue)==TRUE,1,0)) %>% 
+  select(-c(traitName, traitValue)) %>% 
+  pivot_longer(cols = c(TG.carnivore, TG.omnivore, TG.herbivore, TG.detritivore), 
+               names_to = "traitName", values_to = "traitValue") %>% 
+  mutate(valueType = "binary") %>% 
+  filter(traitValue == 1) %>% 
+  relocate(traitName, traitValue)
+
+trait.FM <- trait.cat %>% 
+  filter(traitName == "feedingMode") %>% 
+  mutate(FM.cruise = if_else(grepl("cruise",traitValue)==TRUE,1,0)) %>% 
+  mutate(FM.current = if_else(grepl("current",traitValue)==TRUE,1,0)) %>% 
+  mutate(FM.active.ambush = if_else(grepl("active ambush",
+                                       traitValue)==TRUE,1,0)) %>% 
+  mutate(FM.passive.ambush = if_else(grepl("passive ambush",
+                                        traitValue)==TRUE,1,0)) %>% 
+  # mutate(FM.active = if_else(grepl("active",traitValue)==TRUE & 
+  #                         grepl("active ambush",traitValue)==FALSE,
+  #                         1,0)) %>%  
+  # mutate(FM.passive = if_else(grepl("passive",traitValue)==TRUE,1,0)) %>% 
+  # mutate(FM.ambush = if_else(grepl("ambush",traitValue)==TRUE,1,0)) %>% 
+  # mutate(FM.particle.feeder = if_else(grepl("particle feeder",
+  #                                        traitValue)==TRUE,1,0)) 
+  select(-c(traitName, traitValue)) %>% 
+  pivot_longer(cols = c(FM.cruise, FM.current, 
+                        FM.active.ambush, FM.passive.ambush), 
+               names_to = "traitName", values_to = "traitValue") %>% 
+  mutate(valueType = "binary") %>% 
+  filter(traitValue == 1) %>% 
+  relocate(traitName, traitValue)
+
+trait.RM <- trait.cat %>% 
+  filter(traitName == "reproductionMode") %>% 
+  mutate(RM.brooding = if_else(grepl("brood",traitValue)==TRUE,1,0)) %>% 
+  mutate(RM.broadcasting = if_else(grepl("broadcast",traitValue)==TRUE,1,0)) %>% 
+  select(-c(traitName, traitValue)) %>% 
+  pivot_longer(cols = c(RM.brooding, RM.broadcasting), 
+               names_to = "traitName", values_to = "traitValue") %>% 
+  mutate(valueType = "binary") %>% 
+  filter(traitValue == 1) %>% 
+  relocate(traitName, traitValue)
+ 
+traits.binary <- bind_rows(trait.RM, trait.FM, trait.TG) %>% 
+  group_by(scientificName, traitName, traitValue, traitID, valueType,
+           taxonID, taxonRank, phylum, class, order, family,
+           genus, majorgroup, basisOfRecord) %>% 
+  summarise(primaryReference = cleanStrings(paste(primaryReference, 
+                                                  collapse = "; ")),
+         secondaryReference = cleanStrings(paste(secondaryReference, 
+                                                 collapse = "; ")),
+         .groups = "drop") 
+
+rm(trait.RM, trait.FM, trait.TG)
+```
+
+## Export species level data
+```{r}
+# Add taxonomy information
+traits.species <- traits.species %>% 
+  filter(!is.na(taxonID)) %>% 
+  left_join(select(taxonomy, taxonID, taxonRank, phylum, class, order, family,
+                   genus, majorgroup), 
+            by = "taxonID") %>% 
+  filter(majorgroup != "") %>% 
+  mutate(valueType = "numeric")
+traits.binary <- traits.binary %>% 
+  mutate(valueType = "binary")
+
+# save(traits.species, traits.binary,
+#      file = here("data/traits_level2_curated_20231027.RData"))
+```
+

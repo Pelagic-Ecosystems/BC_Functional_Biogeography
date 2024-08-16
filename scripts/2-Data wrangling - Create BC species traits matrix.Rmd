@@ -1,0 +1,1389 @@
+---
+title: "Finalize level 3 trait data"
+author: "Patrick Pata"
+date: '2023-01-06'
+output: html_document
+---
+
+This file creates the species-traits matrix for analysis in this manuscript. There is no need to rerun this file unless a change in data curation or in the process of estimating missing trait values is needed. The file BC_species_trait_matrices*.RData is produced which contains the complete trait data for subsequent analyses.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries and functions
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(here)
+library(scales)
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+
+source(here("functions/toolkit_database.R"))
+
+theme_set(theme_bw())
+```
+
+# Data preparation
+```{r}
+# Database format
+s.format <- read.csv(here("data/trait_database_raw/trait_dataset_standard_format_20230628.csv"))[-1,]
+
+# Trait directory
+trait.directory <- read.csv(here("data/trait_database_raw/trait_directory_20230628.csv")) %>% 
+  distinct(traitID, .keep_all = TRUE)
+
+# For zoop bc list from community data
+load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
+rm(zoop.bc, taxonomy, zoopmeta, clrs.bioregion, zoopdiversity, zoopenvi,
+   taxalist.dfo.database, zoop.bc.excluded)
+
+# Taxonomy table
+taxonomy <- read.csv(here("data/trait_database_raw/taxonomy_table_20230628.csv")) %>% 
+  distinct(taxonID, .keep_all = TRUE)
+
+# The level 1 and level 2 trait data
+# load(here("data/traits_level1_curated_20231027.RData"))
+load(here("data/traits_level2_curated_20231027.RData"))
+
+# List taxa names in BC (species level and not at species level)
+bc.taxa.list <- bc.not.at.species.list %>% 
+  filter(!is.na(taxonID.under)) %>% 
+  select(Species, taxonID = taxonID.under, trait.db.name = taxa.under.name) %>% 
+  bind_rows(zoop.bc.list) %>% 
+  distinct(Species, taxonID, trait.db.name) %>% 
+  left_join(select(taxonomy, taxonID, phylum, class, order, family, genus),
+            by = "taxonID")
+```
+
+## Subset the trait database and further curate the data
+Remove trait records at a lower taxonomic resolution when species-level information for that group is present.
+```{r, eval=TRUE}
+# Seperate trait data which are not at species-level
+traits.lvl2.gen <- traits.species %>% 
+  filter(taxonRank %notin% c("Species","Subspecies"))
+
+traits.lvl2 <- traits.species %>% 
+  filter(taxonRank %in% c("Species","Subspecies"))
+
+
+# Append the genus level trait values to instances of missing species level values
+traits.lvl2.gen <- traits.lvl2.gen %>% 
+  left_join(traits.lvl2 %>% 
+              select(traitName, traitValue.sp = traitValue, genus),
+            by = join_by(traitName, genus), multiple = "all") %>% 
+  filter(is.na(traitValue.sp)) %>%
+  select(-traitValue.sp)
+
+# Note that the calculated regression equations were only based on the species level trait values and does not included the appended genus level taxa. 
+traits.species <- traits.lvl2 %>% 
+  bind_rows(traits.lvl2.gen) %>% 
+  
+  # Some curations specific to building the BC species x traits table
+  # Remove the one ratioCN, %C, %N record for Pseudocalanus minutus since this forces the entire family Clausocalanidae to have the same value although there are more C:N records for Pseudocalanus elongatus which the mean value is closer to the copepod mean C:N. This is related to the %C and %N values being off too.
+  filter(!(scientificName == "Pseudocalanus minutus" & 
+             traitName %in% c("ratioCN","carbonPDW","nitrogenPDW"))) %>% 
+  # exclude the WSC respiration rate of Arietellus plumifer because it is an order of magnitude lower than the values of all taxa analyzed
+  filter(!(scientificName == "Arietellus plumifer" & traitName %in%  
+             c("respirationRate","respirationRate_WSC"))) %>% 
+  
+  # # Filter the taxonomic groups for analysis
+  # filter(majorgroup %in% c("Calanoid","Non-calanoid","Euphausiid","Mysid",
+  #                          "Hydromedusae","Siphonophore","Amphipod",
+  #                          "Chaetognath","Ostracod","Pteropod","Appendicularian",
+  #                          "Polychaete","Ctenophore","Thaliacean"))
+  
+  # Set value confidence
+  mutate(valueConf = 0)
+  
+rm(traits.lvl2.gen, traits.lvl2)
+```
+
+
+## Identify mean and sd of trait values per taxonomic group
+Use this to calculate the zscores of the level 3 data and identify values that are too anomalous for a specific major group. There instances when there is only one observation for a trait for a majorgroup and thus a zscore is not calculated.
+```{r, eval=FALSE}
+mg.means <- traits.species %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  group_by(traitName, majorgroup) %>% 
+  summarise(tval.mean = mean(traitValue),
+            tval.sd = sd(traitValue),
+            tval.n = n(),
+            tval.min = min(traitValue),
+            tval.max = max(traitValue),  .groups = "drop")
+```
+
+
+
+# BC species level 2 data subset
+
+## Create species list for BC taxa in community data and the taxonIDs in the trait database.
+```{r}
+# Resolve the T. elegans taxonomy
+zoop.bc.list <- zoop.bc.list %>% 
+  mutate(majorgroup = if_else(Species == "Tomopteris elegans",
+                              "Polychaete", majorgroup),
+         taxonRank = if_else(Species == "Tomopteris elegans",
+                             "Species", taxonRank), 
+         taxonID = if_else(Species == "Tomopteris elegans",
+                           4753, taxonID)) %>% 
+  # Select major groups for analysis
+  filter(majorgroup %in% c("Calanoid","Non-calanoid","Euphausiid","Mysid",
+                           "Hydromedusae","Siphonophore","Amphipod",
+                           "Chaetognath","Ostracod","Pteropod","Appendicularian",
+                           "Polychaete","Ctenophore","Thaliacean"))
+
+# List the BC taxa previously analyzed at the species level
+list.sp <- zoop.bc.list %>% 
+  filter(taxonRank %in% c("Species", "Subspecies")) %>% 
+  select(Species, trait.db.name, taxonID, majorgroup)
+
+
+# List the species level names of the BC taxa previously not analyzed at the species level.
+list.not.sp.1 <- zoop.bc.list %>% 
+  # Match with the list of species found in BC for certain taxa
+  left_join(select(filter(bc.not.at.species.list, !is.na(taxonID.under)), 
+                   trait.db.name, taxa.under.name, taxonID.under), 
+            by = "trait.db.name", multiple = "all") %>% 
+  filter(!is.na(taxonID.under)) %>% 
+  select(Species, trait.db.name = taxa.under.name, 
+         taxonID = taxonID.under, majorgroup)
+
+# And for taxa not at species level, also get group taxonID of group level names
+list.not.sp.2 <- bc.not.at.species.list %>% 
+  filter(majorgroup %notin% c("Decapod","Cladoceran")) %>% 
+  distinct(Species, trait.db.name, taxonID, majorgroup)
+
+# This data frame matches the taxa names of the community data with the taxa names in the trait database.
+com.trt.tax.match <- bind_rows(list.sp, list.not.sp.1, list.not.sp.2) %>% 
+  left_join(distinct(zoop.bc.list, Species, presence.perc), by = "Species")
+
+
+rm(list.sp, list.not.sp.1, list.not.sp.2)
+```
+
+
+# Binary Traits
+## Genus level generalization
+For categorical traits, generalize from global species pool of binary traits at genus level.
+```{r}
+traits.binary <- traits.binary %>% 
+  left_join(com.trt.tax.match, 
+            by = join_by(taxonID, majorgroup), multiple = "all") %>% 
+  distinct(scientificName, Species, traitName, traitValue, .keep_all = TRUE)
+
+# The species with binary data
+bc.traits.lvl2.binary <- traits.binary %>% 
+  filter(taxonID %in% com.trt.tax.match$taxonID) %>% 
+  filter(valueType %in% c("binary")) %>% 
+  mutate(valueConf = 0) %>% 
+  distinct(Species, traitName, traitValue, .keep_all = TRUE)
+
+with.data <- bc.traits.lvl2.binary %>% 
+  # rename trait
+  mutate(traitName = if_else(grepl("TG.", traitName), "trophicGroup", traitName),
+         traitName = if_else(grepl("RM.", traitName), "reproductionMode", traitName),
+         traitName = if_else(grepl("FM.", traitName), "feedingMode", traitName)) %>%  mutate(withData = TRUE) %>% 
+  select(Species, traitName, withData)
+
+# List species with missing data
+missing.data <- com.trt.tax.match %>% 
+  distinct(Species, presence.perc) %>% 
+  cross_join(data.frame(
+    traitName = c("trophicGroup","feedingMode","reproductionMode"))) %>% 
+  left_join(with.data, by = join_by(Species, traitName)) %>% 
+  filter(is.na(withData)) %>% 
+  select(-c(withData)) %>% 
+  left_join(com.trt.tax.match, 
+            multiple = "all", by = join_by(Species, presence.perc)) 
+
+# Because some categorical trait values can be repeated, the same species may have multiple rows for a trait. Thus work with binary versions of each categorical trait.
+gen.TG <- generalizeCategoricalTrait(df = traits.binary, binaryPrefix = "TG.", taxonomy)
+gen.RM <- generalizeCategoricalTrait(df = traits.binary, binaryPrefix = "RM.", taxonomy)
+gen.FM <- generalizeCategoricalTrait(df = traits.binary, binaryPrefix = "FM.", taxonomy)
+
+
+# Merge all "binary" generalizations and create categorical versions for figure purposes
+lvl3.binary <- bind_rows(gen.TG, gen.RM, gen.FM) %>% 
+  filter(taxonID %in% filter(missing.data,
+                             traitName %in% c("feedingMode","trophicGroup",
+                                             "reproductionMode"))$taxonID) %>% 
+  mutate(valueConf = 2, traitValue = as.numeric(traitValue)) %>% 
+  # Add the community data species names
+  left_join(com.trt.tax.match, by = join_by(taxonID, majorgroup),
+            multiple = "all") %>%   
+  # Merge the level 2 data
+  bind_rows(bc.traits.lvl2.binary)
+  
+# Create categorical version
+lvl3.categorical <- lvl3.binary %>% 
+# Exclude estimates less than 0.25 probability threshold (because FM has generally 4 levels)
+  filter(traitValue >= 0.25) %>% 
+  mutate(traitValue = str_replace(traitName,"TG.|RM.|FM.","")) %>% 
+  # rename trait
+  mutate(traitName = if_else(grepl("TG.", traitName), "trophicGroup", traitName),
+         traitName = if_else(grepl("RM.", traitName), "reproductionMode", traitName),
+         traitName = if_else(grepl("FM.", traitName), "feedingMode", traitName)) %>% 
+  group_by(Species, taxonID, traitName) %>% 
+  mutate(traitValue = paste0(traitValue, collapse = "; ")) %>% 
+  ungroup() %>% 
+  distinct(taxonID, traitName, traitValue, .keep_all = TRUE)
+
+# Find taxa in the species table which still don't have binary data.
+missing.data <- missing.data %>% 
+  filter(traitName %in% c("feedingMode","trophicGroup", "reproductionMode")) %>% 
+  left_join(distinct(lvl3.categorical, Species, traitName, valueConf),
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+rm(gen.TG, gen.RM, gen.FM, lvl3.categorical)
+```
+
+## Broader group level estimation for binary traits
+Actually in the scripts below, generalizing at the family level returns blank data frames because the taxa with missing trait info need to be generalized at order or class level.
+```{r}
+# 1.1 Generalize reproduction mode at family level. 
+family.bin.rm <- traits.binary %>% 
+  filter(grepl("RM.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(family, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(family) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+    
+missing.data.rm.fam <- missing.data %>% 
+  filter(traitName %in% c("reproductionMode")) %>% 
+  left_join(distinct(taxonomy, taxonID, family), by = "taxonID") %>% 
+  select(-traitName) %>% 
+  left_join(family.bin.rm, by = "family", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 3)
+  
+
+# 1.2 Generalize reproduction mode at order level
+order.bin.rm <- traits.binary %>% 
+  filter(grepl("RM.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(order, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(order) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+
+missing.data.rm.ord <- missing.data %>% 
+  filter(traitName %in% c("reproductionMode")) %>% 
+  left_join(distinct(taxonomy, taxonID, order), by = "taxonID") %>% 
+  distinct(Species, presence.perc, order) %>% 
+  filter(Species %notin% missing.data.rm.fam$Species) %>% 
+  left_join(order.bin.rm, by = "order", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 4)  
+
+# 2.1 Generalize trophic group at family level. 
+family.bin.tg <- traits.binary %>% 
+  filter(grepl("TG.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(family, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(family) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+    
+missing.data.tg.fam <- missing.data %>% 
+  filter(traitName %in% c("trophicGroup")) %>% 
+  left_join(distinct(taxonomy, taxonID, family), by = "taxonID") %>% 
+  select(-traitName) %>% 
+  left_join(family.bin.tg, by = "family", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 3)
+  
+
+# 2.2 Generalize trophic group at order level
+order.bin.tg <- traits.binary %>% 
+  filter(grepl("TG.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(order, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(order) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+
+missing.data.tg.ord <- missing.data %>% 
+  filter(traitName %in% c("trophicGroup")) %>% 
+  left_join(distinct(taxonomy, taxonID, order), by = "taxonID") %>% 
+  distinct(Species, presence.perc, order) %>% 
+  filter(Species %notin% missing.data.tg.fam$Species) %>% 
+  left_join(order.bin.tg, by = "order", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 4)  
+
+# Assign missing polychaete trophic group to carnivore
+poly.tg <-  missing.data %>% 
+  filter(traitName %in% c("trophicGroup")) %>% 
+  filter(Species %in% c("Spionidae","Amphinomidae")) %>% 
+  mutate(traitName = "TG.carnivore", traitValue = 1, valueConf = 5)
+missing.data.tg.ord <- missing.data.tg.ord %>% 
+  bind_rows(poly.tg)
+
+
+# 3.1 Generalize feeding mode at family level. 
+family.bin.fm <- traits.binary %>% 
+  filter(grepl("FM.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(family, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(family) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+    
+missing.data.fm.fam <- missing.data %>% 
+  filter(traitName %in% c("feedingMode")) %>% 
+  left_join(distinct(taxonomy, taxonID, family), by = "taxonID") %>% 
+  select(-traitName) %>% 
+  left_join(family.bin.fm, by = "family", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 3)
+  
+
+# 3.2 Generalize feeding mode at order level
+order.bin.fm <- traits.binary %>% 
+  filter(grepl("FM.",traitName)) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # group at a taxonomic level
+  group_by(order, traitName) %>% 
+  summarise(traitValue = sum(traitValue),  
+            .groups = "drop") %>% 
+  group_by(order) %>% 
+  mutate(ntaxa = sum(traitValue)) %>% 
+  ungroup() %>% 
+  # convert to proportions
+  mutate(traitValue = traitValue / ntaxa)
+
+missing.data.fm.ord <- missing.data %>% 
+  filter(traitName %in% c("feedingMode")) %>% 
+  left_join(distinct(taxonomy, taxonID, order), by = "taxonID") %>% 
+  distinct(Species, presence.perc, order) %>% 
+  filter(Species %notin% missing.data.fm.fam$Species) %>% 
+  left_join(order.bin.fm, by = "order", multiple = "all") %>% 
+  filter(!is.na(traitValue)) %>% 
+  select(-ntaxa) %>% 
+  mutate(valueConf = 4)  
+
+# Assign missing polychaete feeding mode to cruise
+poly.fm <-  missing.data %>% 
+  filter(traitName %in% c("feedingMode")) %>% 
+  filter(majorgroup == "Polychaete") %>% 
+  mutate(traitName = "FM.cruise", traitValue = 1, valueConf = 5) 
+  # mutate(traitName = "FM.active.ambush", traitValue = 1, valueConf = 5)
+missing.data.fm.ord <- missing.data.fm.ord %>% 
+  bind_rows(poly.fm)
+
+lvl3.bin.est <- bind_rows(missing.data.rm.fam, missing.data.rm.ord,
+            missing.data.tg.fam, missing.data.tg.ord,
+            missing.data.fm.fam, missing.data.fm.ord) %>%
+  filter(traitValue >= 0.25) %>% 
+  select(Species, traitName, traitValue, valueConf) %>% 
+  left_join(com.trt.tax.match, by = "Species") 
+
+
+lvl3.binary <- lvl3.binary %>%
+  select(Species, trait.db.name, taxonID, presence.perc, traitName, 
+         traitValue, valueConf, majorgroup) %>% 
+  bind_rows(lvl3.bin.est)
+
+
+# Need to convert lvl3.bin.est to categorical to check which are still missing.
+# Remake the categorical version
+lvl3.categorical <- lvl3.binary %>% 
+  mutate(traitValue = str_replace(traitName,"TG.|RM.|FM.","")) %>% 
+  # rename trait
+  mutate(traitName = if_else(grepl("TG.", traitName), "trophicGroup", traitName),
+         traitName = if_else(grepl("RM.", traitName), "reproductionMode", traitName),
+         traitName = if_else(grepl("FM.", traitName), "feedingMode", traitName)) %>% 
+  group_by(Species, traitName) %>% 
+  mutate(traitValue = paste0(traitValue, collapse = "; ")) %>% 
+  ungroup() %>% 
+  distinct(Species, traitName, traitValue, .keep_all = TRUE) %>% 
+  mutate(notes = "categorical version of generalized binary traits",
+         traitID = NA, valueType = "categorical") %>% 
+  standardizeID(trait.directory) 
+
+# Find taxa in the species table which still don't have binary data.
+missing.data <- missing.data %>% 
+  filter(traitName %in% c("feedingMode","trophicGroup", "reproductionMode")) %>% 
+  left_join(distinct(lvl3.categorical, Species, traitName, valueConf),
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+
+# Create a fuzzy coded dummy variable categorical matrix. Would have to "average" across multiple scientificNames to a species and rescale to [0 1] for fuzzy coding.
+lvl3.cat.matrix <- lvl3.binary %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  filter(traitValue >= 0.25) %>% 
+  group_by(Species, traitName) %>% 
+  summarise(traitValue = mean(traitValue), nsp = n(), .groups = "drop") %>% 
+  # Rescale to [0,1] values
+  mutate(traitName2 = str_sub(traitName, start = 1, end = 2)) %>% 
+  group_by(Species, traitName2) %>% 
+  mutate(traitValue.sum = sum(traitValue)) %>% 
+  ungroup() %>% 
+  mutate(traitValue = traitValue/traitValue.sum) %>% 
+  select(-c(traitName2, traitValue.sum, nsp)) %>% 
+  pivot_wider(names_from = traitName, values_from = traitValue, values_fill = 0) %>% 
+  # Make sure that the species with missing values have NA and not 0
+  pivot_longer(cols = -Species, names_to = "traitName", values_to = "traitValue") %>%
+  mutate(traitName2 = traitName) %>% 
+  mutate(traitName2 = if_else(grepl("TG.", traitName), "trophicGroup", traitName2),
+         traitName2 = if_else(grepl("RM.", traitName), "reproductionMode", traitName2),
+         traitName2 = if_else(grepl("FM.", traitName), "feedingMode", traitName2)) %>%  
+  left_join(select(missing.data, Species, traitName, majorgroup),
+            join_by(Species, traitName2 == traitName)) %>% 
+  filter(is.na(majorgroup)) %>% 
+  select(-c(traitName2, majorgroup)) %>% 
+  # Convert back to fuzzy matrix
+  pivot_wider(names_from = traitName, values_from = traitValue, 
+              values_fill = NA) %>% 
+  relocate("Species","RM.broadcasting","RM.brooding",
+           "FM.cruise","FM.current",
+           "FM.active.ambush","FM.passive.ambush",
+           "TG.herbivore","TG.omnivore",
+           "TG.carnivore","TG.detritivore")
+
+rm(family.bin.rm, family.bin.tg, family.bin.fm, lvl3.bin.est,
+   order.bin.rm, order.bin.tg, order.bin.fm,
+   missing.data.rm.fam, missing.data.rm.ord,
+   missing.data.tg.fam, missing.data.tg.ord, poly.tg,
+   missing.data.fm.fam, missing.data.fm.ord)
+rm(missing.data, bc.traits.lvl2.binary)
+```
+
+# Numeric traits
+## Extract from level 2 data and identify missing species
+```{r}
+bc.traits.lvl2 <- traits.species %>% 
+  filter(taxonID %in% com.trt.tax.match$taxonID) %>% 
+  left_join(com.trt.tax.match, 
+            by = join_by(taxonID, majorgroup), multiple = "all") %>% 
+  mutate(valueConf = 0)
+
+# list species and traits with data
+with.data <- bc.traits.lvl2 %>% 
+  distinct(Species, presence.perc, traitName) %>% 
+  filter(!is.na(traitName) ) 
+
+
+# supposed number of taxa
+com.trt.tax.match %>% 
+  distinct(Species, presence.perc) %>% 
+  # filter(presence.perc >= 3) %>%
+  nrow()
+
+# evaluate completion
+with.data %>% 
+  # filter(presence.perc >= 3) %>% 
+  group_by(traitName) %>% 
+  summarise(ntaxa = n(), .groups = "drop") %>% 
+  # mutate(perc.taxa = ntaxa/125*100)
+  mutate(perc.taxa = ntaxa/389*100) %>% 
+  arrange(-ntaxa)
+
+
+# List missing species-trait values
+missing.data <- com.trt.tax.match %>% 
+  distinct(Species, presence.perc) %>% 
+  cross_join(distinct(bc.traits.lvl2, traitName)) %>% 
+  left_join(with.data %>% mutate(withData = TRUE), 
+             by = join_by(Species, presence.perc, traitName)) %>% 
+  filter(is.na(withData)) %>% 
+  select(-withData) %>% 
+  left_join(com.trt.tax.match, 
+            multiple = "all", by = join_by(Species, presence.perc))
+
+rm(with.data)
+```
+
+## Generalizing trait values
+Do this first by generalizing from species in BC waters and if not present, from the global dataset.
+```{r}
+missing.num <- missing.data %>% 
+  filter(traitName %in% c("carbonPDW","nitrogenPDW","phosphorusPDW",
+                          "ratioCN","ratioCP","ratioNP",
+                          "bodyLength","waterPWW",
+                          "respirationRate","respirationRate_WSC",
+                          "excretionRateN","excretionRateN_WSDW",
+                          "excretionRateP","excretionRateP_WSDW",
+                          "clearanceRate","clearanceRate_WSC"))
+
+traits.lvl2.num <- traits.species %>% 
+  filter(traitName %in% c("carbonPDW","nitrogenPDW","phosphorusPDW",
+                          "ratioCN","ratioCP","ratioNP",
+                          "bodyLength","waterPWW",
+                          "respirationRate","respirationRate_WSC",
+                          "excretionRateN","excretionRateN_WSDW",
+                          "excretionRateP","excretionRateP_WSDW",
+                          "clearanceRate","clearanceRate_WSC")) %>% 
+  mutate(traitValue = as.numeric(traitValue))
+
+# Genus level average - BC taxa
+traits.genus <- traits.lvl2.num %>% 
+  filter(taxonID %in% bc.taxa.list$taxonID) %>% 
+  group_by(traitName, genus) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop") %>% 
+  filter(genus != "")
+
+# Estimated numeric data at genus level - BC taxa
+lvl3.num.est.1a <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, genus), by = "taxonID") %>% 
+  left_join(traits.genus, by = join_by(genus, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "genus")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the genus level average.")) %>% 
+  mutate(valueConf = 2) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.1a, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+
+# Genus level average - global
+traits.genus <- traits.lvl2.num %>% 
+  group_by(traitName, genus) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop") %>% 
+  filter(genus != "")
+
+# Estimated numeric data at genus level - BC taxa
+lvl3.num.est.1b <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, genus), by = "taxonID") %>% 
+  left_join(traits.genus, by = join_by(genus, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "genus")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the genus level average.")) %>% 
+  mutate(valueConf = 2) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.1b, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+
+
+# Family level average - BC taxa
+traits.family <- traits.lvl2.num %>% 
+  filter(taxonID %in% bc.taxa.list$taxonID) %>%
+  group_by(traitName, family) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at family level
+lvl3.num.est.2a <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, family), by = "taxonID") %>% 
+  left_join(traits.family, by = join_by(family, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "family")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the family level average.")) %>% 
+  mutate(valueConf = 3) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.2a, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+
+# Family level average - global taxa
+traits.family <- traits.lvl2.num %>% 
+  group_by(traitName, family) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at family level
+lvl3.num.est.2b <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, family), by = "taxonID") %>% 
+  left_join(traits.family, by = join_by(family, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "family")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the family level average.")) %>% 
+  mutate(valueConf = 3) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.2b, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf)
+
+
+
+# Order level average - BC taxa
+traits.order <- traits.lvl2.num %>%
+  filter(taxonID %in% bc.taxa.list$taxonID) %>%
+  group_by(traitName, order) %>%
+  summarise(individualCount = n(), dispersionSD = sd(traitValue),
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at order level
+lvl3.num.est.3a <- missing.num %>%
+  left_join(distinct(taxonomy, taxonID, order), by = "taxonID") %>%
+  left_join(traits.order, by = join_by(order, traitName)) %>%
+  filter(!is.na(traitValue)) %>%
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID,
+                   aphiaAuthority = "valid_authority", kingdom, phylum,
+                   class, order, order, genus, taxonID),
+            by = c("taxonID", "order")) %>%
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit),
+            by = "traitName") %>%
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized",
+         notes = paste0("Trait value generalized from the order level average.")) %>%
+  mutate(valueConf = 4) %>%
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>%
+  left_join(distinct(lvl3.num.est.3a, traitName, Species, valueConf),
+            by = join_by(Species, traitName)) %>%
+  filter(is.na(valueConf)) %>%
+  select(-valueConf)
+
+# Order level average - global taxa
+traits.order <- traits.lvl2.num %>%
+  group_by(traitName, order) %>%
+  summarise(individualCount = n(), dispersionSD = sd(traitValue),
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at order level
+lvl3.num.est.3b <- missing.num %>%
+  left_join(distinct(taxonomy, taxonID, order), by = "taxonID") %>%
+  left_join(traits.order, by = join_by(order, traitName)) %>%
+  filter(!is.na(traitValue)) %>%
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID,
+                   aphiaAuthority = "valid_authority", kingdom, phylum,
+                   class, order, order, genus, taxonID),
+            by = c("taxonID", "order")) %>%
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit),
+            by = "traitName") %>%
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized",
+         notes = paste0("Trait value generalized from the order level average.")) %>%
+  mutate(valueConf = 4) %>%
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>%
+  left_join(distinct(lvl3.num.est.3b, traitName, Species, valueConf),
+            by = join_by(Species, traitName)) %>%
+  filter(is.na(valueConf)) %>%
+  select(-valueConf)
+
+
+
+
+# Class level average - BC taxa
+traits.class <- traits.lvl2.num %>% 
+  filter(taxonID %in% bc.taxa.list$taxonID) %>%
+  group_by(traitName, class) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at class level
+lvl3.num.est.4a <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, class), by = "taxonID") %>% 
+  left_join(traits.class, by = join_by(class, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "class")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the class level average.")) %>% 
+  mutate(valueConf = 5) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.4a, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf) %>% 
+  arrange(-presence.perc)
+
+# Class level average - global taxa
+traits.class <- traits.lvl2.num %>% 
+  group_by(traitName, class) %>% 
+  summarise(individualCount = n(), dispersionSD = sd(traitValue), 
+            traitValue = mean(traitValue), .groups = "drop")
+
+# Estimated numeric data at class level
+lvl3.num.est.4b <- missing.num %>% 
+  left_join(distinct(taxonomy, taxonID, class), by = "taxonID") %>% 
+  left_join(traits.class, by = join_by(class, traitName)) %>% 
+  filter(!is.na(traitValue)) %>% 
+  left_join(distinct(taxonomy, taxonRank, taxonRankID, acceptedNameUsageID, 
+                   aphiaAuthority = "valid_authority", kingdom, phylum, 
+                   class, order, family, genus, taxonID), 
+            by = c("taxonID", "class")) %>% 
+  left_join(distinct(traits.lvl2.num, traitName, traitUnit), 
+            by = "traitName") %>% 
+  mutate(aggregateMeasure = FALSE, isDerived = TRUE, valueType = "numeric",
+         basisOfRecord = "generalized", 
+         notes = paste0("Trait value generalized from the class level average.")) %>% 
+  mutate(valueConf = 5) %>% 
+  mutate(traitValue = as.character(traitValue))
+
+# update the missing data list
+missing.num <- missing.num %>% 
+  left_join(distinct(lvl3.num.est.4b, traitName, Species, valueConf), 
+            by = join_by(Species, traitName)) %>% 
+  filter(is.na(valueConf)) %>% 
+  select(-valueConf) %>% 
+  arrange(-presence.perc)
+
+
+# OSTRACOD PHOSPHORUS
+# Ostracod size range in BC waters
+AA <- bc.traits.lvl2 %>% 
+  filter(presence.perc > 3) %>% 
+  filter(majorgroup == "Ostracod" & traitName == "bodyLength") 
+# Copepods in BC waters within ostracod size range
+BB <- traits.species %>% 
+  filter(taxonID %in% bc.taxa.list$taxonID) %>%
+  filter(majorgroup %in% c("Calanoid","Non-calanoid") & 
+           traitName == "bodyLength") %>% 
+  filter(traitValue >= min(AA$traitValue) & traitValue <= max(AA$traitValue)) %>% 
+  distinct(taxonID, scientificName)
+# Copepod phosphorus trait data within ostracod size range
+CC <- traits.species %>% 
+  filter(majorgroup %in% c("Calanoid","Non-calanoid") & 
+           traitName %in% c("phosphorusPDW","ratioCP","ratioNP")) %>% 
+  filter(taxonID %in% BB$taxonID) %>% 
+  group_by(traitName, traitUnit) %>% 
+  summarise(traitValue = mean(traitValue), n = n(), .groups = "drop") %>% 
+  select(-n) 
+  # pivot_wider(names_from = "traitName", values_from = "traitValue") 
+ostr.est <- com.trt.tax.match %>% 
+  filter(majorgroup == "Ostracod") %>% 
+  select(Species, majorgroup, presence.perc) %>% 
+  cross_join(CC) %>% 
+  mutate(valueConf = 6) %>% 
+  mutate(traitValue = as.character(traitValue))
+rm(AA,BB,CC)
+
+# Merge with the bc traits dataset
+lvl3.num.gen <- bc.traits.lvl2 %>%
+  mutate(traitValue = as.character(traitValue)) %>%
+  bind_rows(lvl3.num.est.1a, lvl3.num.est.1b) %>%
+  bind_rows(lvl3.num.est.2a, lvl3.num.est.2b) %>%
+  bind_rows(lvl3.num.est.3a, lvl3.num.est.3b) %>%
+  bind_rows(lvl3.num.est.4a, lvl3.num.est.4b) %>%
+  bind_rows(ostr.est) %>% 
+  distinct(Species, traitName, traitValue, traitUnit, valueConf) %>%
+  mutate(traitValue = as.numeric(traitValue)) %>%
+  group_by(Species, traitName, traitUnit, valueConf) %>%
+  summarise(traitValue = mean(traitValue), .groups = "drop") %>%
+  left_join(distinct(com.trt.tax.match, Species, majorgroup, presence.perc),
+            by = "Species")
+
+rm(lvl3.num.est.1a, lvl3.num.est.2a, lvl3.num.est.3a, lvl3.num.est.4a,
+   lvl3.num.est.1b, lvl3.num.est.2b, lvl3.num.est.3b, lvl3.num.est.4b,
+   traits.genus, traits.family, traits.order, traits.class)
+```
+
+
+## Add the DFO dry weight data
+```{r}
+# Prepare the bc.dw data for merging into the trait database
+bc.dw <- read.csv(here("data/bc_database_dryweights_20231108.csv")) %>% 
+  # Select the dry weight value to use
+  mutate(traitValue = dryWeight.mean, traitName = "dryWeight",
+         traitID = 4, basisOfRecord = "estimated from BC zooplankton database") %>% 
+  rename(dispersionSD = dryWeight.sd, individualCount = nsamples) %>%
+  # mutate(traitValue = as.character(traitValue)) %>% 
+  # select(-c(dryWeight.max, dryWeight.mean)) %>% 
+  left_join(distinct(com.trt.tax.match, Species, majorgroup, presence.perc),
+            by = "Species") %>% 
+  filter(majorgroup %in% bc.traits.lvl2$majorgroup)
+
+
+## Comparison of the trait database dry weight values with DFO database dry weights
+# Only 69 taxa have dry weight values in the trait database. The trait database values for Salpa fusiformis, Clio pyramida, Clione limacina, Pleurobrachia, Halicreas minimum, Thysanoessa intermis, Tessarabrachion oculatu, Primno abyssalis, Streetsia procella have higher values. For many other taxa, the trait database dry weight values are generally larger especially when comparing to the DFO database mean dry weight.
+
+traits.species %>% 
+  filter((traitName == "dryWeight" & taxonID %in% bc.dw$taxonID)) %>%
+  select(taxonID, scientificName, traitValue.db = traitValue) %>% 
+  mutate(traitValue.db = as.numeric(traitValue.db)) %>% 
+  left_join(bc.dw) %>% 
+  # Plot species that match
+  ggplot( aes(x = traitValue.db, y = traitValue)) +
+    geom_abline() +
+    geom_text(aes(label = scientificName)) +
+    geom_point(color = "red") +
+    xlab("Trait database") + ylab("DFO dry weight")
+```
+
+
+## Calculate total carbon, nitrogen, and phosphorus content from dry weight and percent composition.
+```{r, eval=True}
+bc.dw.comp.1 <- read.csv(here("data/bc_database_dryweights_20231108.csv")) %>% 
+  left_join(lvl3.num.gen %>% 
+              filter(traitName %in% c("carbonPDW","nitrogenPDW","phosphorusPDW")),
+            by = "Species", multiple = "all") %>% 
+  filter(majorgroup %in% bc.traits.lvl2$majorgroup) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # Calculate total based on percent composition
+  mutate(traitValue = (traitValue/100)*dryWeight.mean, 
+         traitUnit = "mg",
+         traitName = str_replace(traitName, "PDW", "Weight")) %>% 
+  select(Species, dryWeight.mean, traitName, traitValue, traitUnit, majorgroup) %>%
+  # Average for each of the community data species names
+  group_by(Species, dryWeight.mean, traitName, traitUnit, majorgroup) %>% 
+  summarise(traitValue = mean(traitValue), .groups = "drop") %>% 
+  mutate(basisOfRecord = "calculated from composition % dry weight")
+
+# Compare the values in the records with calculated from above
+AA <- bc.dw.comp.1 %>% 
+  left_join(missing.data %>% select(Species, traitName, presence.perc)) %>% 
+  filter(is.na(presence.perc)) %>% 
+  select(-presence.perc)
+
+BB <- bc.traits.lvl2 %>% 
+  filter(traitName %in% c("carbonWeight","nitrogenWeight","phosphorusWeight")) %>% 
+  mutate(traitValue = as.numeric(traitValue))
+
+CC <- AA %>% 
+  rename(traitValue.cal = traitValue) %>% 
+  left_join(select(BB, Species, traitName, traitValue.orig = traitValue))
+
+# The trait database values generally have more higher value points (except for the carbon weight of Salpa maxima which had a large %carbon trait value).
+ggplot(CC, aes(x = traitValue.orig, y = traitValue.cal)) +
+  geom_abline() +
+  geom_point() +
+  facet_wrap(~traitName, scales = "free") +
+  xlab("trait database") + ylab("calculated from % dry weight")
+
+rm(AA, BB, CC)
+```
+
+
+# Recalculate regressions - individual level
+## Excretion rates
+Separate equations for crustaceans, appendicularians, all other soft-bodied organisms
+- Can use RMA in lmodel2 but it only returns the R2 of the OLS, so unclear how to report this. The results of OLS vs RMA show a slightly steeper slope with RMA, which is explained in its vignette but it if this is significant or not. 
+```{r}
+# Function for calculating regressions and organizing results
+getRegModel <- function(df, grp = "All", traitX, traitY) {
+  data.sub <- df %>% 
+    filter(grepl(grp, group)) %>% 
+    filter(sizeAssocName == traitX & traitName == traitY) %>% 
+    filter(traitValue > 0 & sizeAssocValue > 0)
+  reg <- lm(log10(traitValue) ~ log10(sizeAssocValue), 
+            data = data.sub)
+  
+reg.results <- data.frame(model = "OLS", grp = grp, X = traitX,  Y = traitY, 
+                          a = reg$coefficients[1],
+                          b = reg$coefficients[2],
+                          n = nrow(data.sub),
+                          R2 = summary(reg)$adj.r.squared,
+                          RSE = summary(reg)$sigma,
+                          pval = getpval(summary(reg)$fstatistic), base = "10",
+                          minX = min(data.sub$sizeAssocValue), 
+                          maxX = max(data.sub$sizeAssocValue)) %>% 
+      remove_rownames()
+}
+
+# Level 1 data
+load(here("data/traits_level1_curated_20231027.RData"))
+
+# dry weight vs excretion rate N & P
+dw.ex <- traits.lvl1 %>% 
+  filter(traitName %in% c("excretionRateN","excretionRateP")) %>% 
+  filter(!is.na(sizeAssocValue)) %>% 
+  filter(sizeAssocName == "dryWeight" & sizeAssocUnit == "mg") %>% 
+  select(catalogNumber, scientificName, traitValue, traitName,
+          sizeAssocName, sizeAssocValue, phylum, majorgroup) %>% 
+  mutate(group = "All Crustaceans") %>% 
+  mutate(group = if_else(phylum != "Arthropoda" & 
+                           majorgroup != "Appendicularian",
+                         "All GelApp Gelatinous", group)) %>% 
+  mutate(group = if_else(majorgroup == "Appendicularian",
+                         "All GelApp Appendicularian", group))
+
+traitY <- c("excretionRateN","excretionRateP")
+grp <- c("All","Crustaceans","GelApp","Gelatinous","Appendicularian")
+reg.results1 <- data.frame()
+for (yy in traitY){
+  for (gg in grp){
+    reg.results1 <- reg.results1 %>% 
+      bind_rows(getRegModel(df = dw.ex, grp = gg, 
+                  traitX = "dryWeight", traitY = yy))
+  }
+}
+
+# Loop through each model and calculate values for ggplot
+df.reg.1 <- data.frame()
+for(i in 1:nrow(reg.results1)) {
+  # create a dummy dataframe of trait values based on the limits of the model
+  df.now <- bind_cols(reg.results1[i,1:4],
+               trait.x = seq(reg.results1$minX[i], reg.results1$maxX[i], len = 5)) %>% 
+    mutate(trait.y = conv.allom(trait.x, reg.results1$a[i], reg.results1$b[i],
+                                base = 10))
+  df.reg.1 <- df.reg.1 %>% 
+    bind_rows(df.now)
+}
+```
+
+## Respiration rate and clearance rate
+```{r}
+cw.rc <- traits.lvl1 %>% 
+  filter(traitName %in% c("respirationRate", "clearanceRate")) %>% 
+  filter(!is.na(sizeAssocValue) & sizeAssocValue != 0) %>% 
+  filter(sizeAssocName == "carbonWeight" & sizeAssocUnit == "mg") %>% 
+  select(catalogNumber, scientificName, traitValue, traitName,
+          sizeAssocName, sizeAssocValue, phylum, majorgroup) %>% 
+  mutate(group = "All Crustaceans") %>% 
+  mutate(group = if_else(phylum != "Arthropoda",
+                         "All Gelatinous", group)) 
+
+
+traitY <- c("respirationRate", "clearanceRate")
+grp <- c("All","Crustaceans","Gelatinous")
+reg.results2 <- data.frame()
+for (yy in traitY){
+  for (gg in grp){
+    reg.results2 <- reg.results2 %>% 
+      bind_rows(getRegModel(df = cw.rc, grp = gg, 
+                  traitX = "carbonWeight", traitY = yy))
+  }
+}
+
+# Loop through each model and calculate values for ggplot
+df.reg.2 <- data.frame()
+for(i in 1:nrow(reg.results2)) {
+  # create a dummy dataframe of trait values based on the limits of the model
+  df.now <- bind_cols(reg.results2[i,1:4],
+               trait.x = seq(reg.results2$minX[i], reg.results2$maxX[i], len = 5)) %>% 
+    mutate(trait.y = conv.allom(trait.x, reg.results2$a[i], reg.results2$b[i],
+                                base = 10))
+  df.reg.2 <- df.reg.2 %>% 
+    bind_rows(df.now)
+}
+```
+
+
+## Figure of new regression equations
+```{r, fig.width=4}
+raw.points <- bind_rows(dw.ex, cw.rc) %>% 
+  mutate(traitName = factor(traitName, levels = c("respirationRate","clearanceRate",
+                                                  "excretionRateN","excretionRateP")))
+
+plot.lines <- bind_rows(df.reg.1, df.reg.2) %>% 
+  filter(grp %notin% c("All","GelApp")) %>% 
+  mutate(grp = factor(grp, levels = c("Crustaceans","Gelatinous","Appendicularian"))) %>% 
+  rename(traitName = Y, sizeAssocValue = trait.x, traitValue = trait.y) %>% 
+  mutate(traitName = factor(traitName, levels = c("respirationRate","clearanceRate",
+                                                  "excretionRateN","excretionRateP")))
+
+
+ggplot(raw.points,
+       aes(x = sizeAssocValue, y = traitValue)) +
+  geom_point(aes(fill = majorgroup), shape = 21, alpha = 0.6, color = "white") +
+  scale_fill_manual(values = majorgroup.colors$color,
+                    name = "Major group") +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+                labels = trans_format("log10", math_format(10^.x))) +
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+                labels = trans_format("log10", math_format(10^.x))) +
+  xlab("Weight") + ylab("Trait value") +
+  geom_line(data = plot.lines, 
+            aes(x = sizeAssocValue, y = traitValue, color = grp),
+            linewidth = 1.5, alpha = 0.8) +
+  scale_color_manual(values = c("darkblue","green4","violetred"),
+                     name = "Regression\ngroup") +
+  facet_wrap(~traitName, scales = "free",
+             labeller = as_labeller(c(`clearanceRate` = "Clearance Rate",
+                                      `respirationRate` = "Respiration Rate",
+                                      `excretionRateN` = "Ammonia Excretion Rate",
+                                      `excretionRateP` = "Phosphate Excretion Rate")))
+
+ggsave(filename = here("figures/fig_s2_individual_level_regresssions.png"),
+    width = 8, height= 6, units = "in", dpi = 600)  
+
+# Select Models to use
+allomModels <- bind_rows(reg.results1, reg.results2) %>% 
+  filter(grp %notin% c("All","GelApp"))
+# write.csv(allomModels, 
+#           file = here("for printing/table_individual_level_regressions.csv"),
+#           row.names = FALSE)
+
+# rm(dw.ex, cw.rc, df.reg.1, df.reg.2, reg.results1, reg.results2)
+```
+
+
+## Calculate rates from regression equations
+For excretion rates, the min range of the regressions are above the minimum dry weight of BC species. Here, the regressions are applied to these slightly smaller species (e.g., Oncaea). Alternatively, the generalized WSC values can be used and these mostly match the values from the regressions.
+```{r, eval=TRUE}
+# Apply separately on DW and CW
+bc.dw.2 <- bc.dw %>% 
+  select(-c(traitID)) %>% 
+  # Add taxonomy information
+  left_join(select(taxonomy, taxonID, phylum, class, order, family, genus), 
+            by = "taxonID") %>%
+  mutate(group = "Crustaceans") %>% 
+  mutate(group = if_else(phylum != "Arthropoda" & 
+                           majorgroup != "Appendicularian",
+                         "Gelatinous", group)) %>% 
+  mutate(group = if_else(majorgroup == "Appendicularian",
+                         "Appendicularian", group))
+allomModels.sub <- allomModels %>% 
+  filter(Y %in% c("excretionRateN","excretionRateP"))
+
+bc.dw.rate.3 <- data.frame()
+for (i in c(1:nrow(allomModels.sub))) {
+  model <- allomModels.sub[i,]
+  
+  df.calc <- bc.dw.2 %>% 
+    filter(str_detect(group, model$grp),
+           traitName %in% model$X) %>% 
+    # filter(traitValue >= model$minX &
+    #        traitValue <= model$maxX) %>% 
+    # Add size information
+    mutate(sizeAssocName = traitName, sizeAssocValue = traitValue) %>%
+    
+    # Calculate values
+    mutate(traitName = model$Y,
+           traitValue =  conv.allom(traitValue, model$a, model$b, base = 10)) %>% 
+    
+    left_join(distinct(trait.directory, traitName, traitID, traitUnit), 
+              by = "traitName") %>% 
+    mutate(basisOfRecord = "calculated from regression",
+           notes = paste0("Value calculated from ",model$X, " using the equation: ",
+                          "y = ",model$base,"^(",sprintf("%.3f",model$a),
+                          "+(",sprintf("%.3f",model$b),
+                          "*log(x,",model$base,")))."))
+  
+  bc.dw.rate.3 <- bc.dw.rate.3 %>% 
+    bind_rows(df.calc)
+}
+
+
+bc.cw <- bc.dw.comp.1 %>% 
+  filter(traitName %in% c("carbonWeight")) %>% 
+  # Add taxonomy information
+  left_join(select(com.trt.tax.match, Species, taxonID), by = "Species") %>% 
+  left_join(select(taxonomy, taxonID, phylum, class, order, family, genus), 
+            by = "taxonID") %>%
+  mutate(group = "Crustaceans") %>% 
+  mutate(group = if_else(phylum != "Arthropoda",
+                         "Gelatinous", group)) %>% 
+  distinct(Species, traitName, traitValue, group)
+
+allomModels.sub <- allomModels %>% 
+  filter(Y %in% c("respirationRate","clearanceRate"))
+
+bc.dw.rate.4 <- data.frame()
+for (i in c(1:nrow(allomModels.sub))) {
+  model <- allomModels.sub[i,]
+  
+  df.calc <- bc.cw %>% 
+    filter(str_detect(group, model$grp),
+           traitName %in% model$X) %>% 
+    filter(traitValue >= model$minX &
+           traitValue <= model$maxX) %>%
+    # Add size information
+    mutate(sizeAssocName = traitName, sizeAssocValue = traitValue) %>%
+    
+    # Calculate values
+    mutate(traitName = model$Y,
+           traitValue =  conv.allom(traitValue, model$a, model$b, base = 10)) %>% 
+    
+    left_join(distinct(trait.directory, traitName, traitID, traitUnit), 
+              by = "traitName") %>% 
+    mutate(basisOfRecord = "calculated from regression",
+           notes = paste0("Value calculated from ",model$X, " using the equation: ",
+                          "y = ",model$base,"^(",sprintf("%.3f",model$a),
+                          "+(",sprintf("%.3f",model$b),
+                          "*log(x,",model$base,")))."))
+  
+  bc.dw.rate.4 <- bc.dw.rate.4 %>% 
+    bind_rows(df.calc)
+}
+
+
+```
+
+### Calculate weight specific rates
+```{r}
+bc.dw.rates.weight <- bind_rows(bc.dw.rate.3,bc.dw.rate.4) %>% 
+  # calculate the weight sepcific value
+  mutate(traitValue = traitValue/sizeAssocValue,
+         traitName = if_else(sizeAssocName == "carbonWeight",
+                             paste0(traitName,"_WSC"), paste0(traitName,"_WSDW")),
+         traitUnit = if_else(sizeAssocName == "carbonWeight",
+                             str_replace(traitUnit, " h", " mg C^-1 h"),
+                             str_replace(traitUnit, " h", " mg DW^-1 h")),
+         basisOfRecord = "calculated from individual rate and associated weight",
+         valueConf = 1)
+
+
+ggplot(bc.dw.rates.weight, aes(x = sizeAssocValue, y = traitValue)) +
+  geom_point() +
+  facet_wrap(~traitName, scales = "free")
+
+# Compare with literature/generalization (for resp and clearance)
+
+# Compare generalization and regression. The generalization often produces larger trait values, except for the Salpa maxima respiration rate.
+AA <- lvl3.num.gen %>% 
+  filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC",
+                          "excretionRateN_WSDW","excretionRateP_WSDW")) %>% 
+  # filter(valueConf == 0) %>%
+  select(Species, traitName, traitValue, valueConf) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  group_by(Species, traitName, valueConf) %>% 
+  summarise(traitValue = mean(traitValue), .groups = "drop") %>% 
+  rename(traitValue.1 = traitValue) %>% 
+  left_join(select(bc.dw.rates.weight, 
+                   Species, traitName, traitValue.2 = traitValue),
+            by = join_by(Species, traitName))
+
+ggplot(AA, aes(x = traitValue.1, y = traitValue.2)) +
+  geom_abline() +
+  geom_point(aes(color = as.factor(valueConf))) +
+  facet_wrap(~traitName, scales = "free") +
+  xlab("generalization/literature") + ylab("regression")
+
+AA %>% 
+  arrange(-traitValue.1) %>% 
+  group_by(traitName) %>% 
+  arrange(traitName) %>% 
+  filter(row_number() <= 3)
+
+rm(AA)
+```
+
+## Select the WS rate values
+Use the literature values when present. Supplement these with the values calculated from regressions. Then apply this to the DFO dry weights.
+```{r}
+# TODO Decide at what point the regression results will be used
+
+# ** IF LITERATURE + (GENERALIZATION) + REGRESSION **
+rates.ws.1 <- lvl3.num.gen %>%
+  filter(valueConf %in% c(0)) %>%
+  filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC")) %>%
+  # assign the corresponding DW or CW from the DFO data
+  left_join(select(bc.cw, Species, sizeAssocName = traitName,
+                   sizeAssocValue = traitValue), by = "Species")
+rates.ws.2 <- lvl3.num.gen %>%
+  filter(valueConf %in% c(0)) %>%
+  filter(traitName %in% c("excretionRateN_WSDW","excretionRateP_WSDW")) %>%
+  # assign the corresponding DW or CW from the DFO data
+  left_join(select(bc.dw, Species, sizeAssocName = traitName,
+                   sizeAssocValue = traitValue), by = "Species")
+
+# For gelatinous taxa, use generalizations of weight-specific rates when present
+rates.ws.3 <- lvl3.num.gen %>%
+  filter(valueConf %in% c(2,3,4,5)) %>%
+  filter(majorgroup %in% c("Hydromedusae","Siphonophore","Chaetognath",
+                           "Pteropod","Appendicularian",
+                           "Polychaete","Ctenophore","Thaliacean")) %>%
+  filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC")) %>%
+  # assign the corresponding DW or CW from the DFO data
+  left_join(select(bc.cw, Species, sizeAssocName = traitName,
+                   sizeAssocValue = traitValue), by = "Species")
+rates.ws.4 <- lvl3.num.gen %>%
+  filter(valueConf %in% c(2,3,4,5)) %>%
+  filter(majorgroup %in% c("Hydromedusae","Siphonophore","Chaetognath",
+                           "Pteropod","Appendicularian",
+                           "Polychaete","Ctenophore","Thaliacean")) %>%
+  filter(traitName %in% c("excretionRateN_WSDW","excretionRateP_WSDW")) %>%
+  # assign the corresponding DW or CW from the DFO data
+  left_join(select(bc.dw, Species, sizeAssocName = traitName,
+                   sizeAssocValue = traitValue), by = "Species")
+
+
+rates.ws <- bind_rows(rates.ws.1, rates.ws.2, rates.ws.3, rates.ws.4)
+rm(rates.ws.1, rates.ws.2, rates.ws.3, rates.ws.4)
+
+
+rates.missing <- missing.data %>% 
+  filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC",
+                          "excretionRateN_WSDW","excretionRateP_WSDW")) %>% 
+  left_join(select(rates.ws, Species, traitName, valueConf)) %>% 
+  filter(is.na(valueConf))
+
+# Estimate remaining missing values from regressions
+bc.dw.rates.weight <- bc.dw.rates.weight %>% 
+  left_join(select(rates.ws, Species, traitName, traitValue.2 = traitValue)) %>% 
+  filter(is.na(traitValue.2)) %>% 
+  select(-c(dryWeight.mean, dryWeight.max, traitValue.2))
+
+rates.ws <- rates.ws %>% 
+  bind_rows(bc.dw.rates.weight)
+
+rates.indiv <- rates.ws %>%
+  mutate(traitValue = traitValue * sizeAssocValue,
+         traitName = str_remove(traitName, "_WSC|_WSDW"),
+         traitUnit = if_else(sizeAssocName == "carbonWeight",
+                             str_remove(traitUnit,"mg C\\^-1 "),
+                             str_remove(traitUnit,"mg DW\\^-1 ")))
+# rm(bc.dw.rates.weight)
+```
+
+
+## Organize the derivation and regression results from dry weight
+```{r}
+lvl3.numeric <- 
+  # The generalized composition values from literature
+  lvl3.num.gen %>% 
+  filter(traitName %in% c("bodyLength","waterPWW","carbonPDW",
+                          "nitrogenPDW","phosphorusPDW",
+                          "ratioCN","ratioCP","ratioNP")) %>% 
+  # The DFO dry weight
+  bind_rows(bc.dw %>% 
+              mutate(traitUnit = "mg", valueConf = 0) %>% 
+              select(-c(dryWeight.mean, dryWeight.max))) %>% 
+  
+  # The calculated C,N,P weights from dry weight and percent composition
+  bind_rows(bc.dw.comp.1 %>% 
+              mutate(valueConf = 1)) %>% 
+  
+  # The literature and derived weight-specific rates from regressions of indiv rates
+  bind_rows(rates.ws) %>% 
+  
+  # The calculated individual rates from dry weight and weight specific rates
+  bind_rows(rates.indiv) %>% 
+  select(-c(presence.perc, majorgroup, group)) %>% 
+  left_join(distinct(com.trt.tax.match, Species, presence.perc, majorgroup), 
+            by = "Species")
+```
+
+
+# Finalize numeric traits 
+```{r}
+lvl3.num.matrix <- lvl3.numeric %>% 
+  select(Species, traitName, traitValue) %>% 
+  pivot_wider(names_from = traitName, values_from = traitValue, 
+              values_fill = NA) %>% 
+  relocate("Species","bodyLength","carbonWeight","dryWeight",
+           "waterPWW","carbonPDW","nitrogenPDW","phosphorusPDW",
+           "ratioCN","ratioCP","ratioNP",
+           "nitrogenWeight","phosphorusWeight",
+           "respirationRate","respirationRate_WSC",
+           "excretionRateN","excretionRateN_WSDW",
+           "excretionRateP","excretionRateP_WSDW",
+           "clearanceRate","clearanceRate_WSC")
+  
+missing.num <- com.trt.tax.match %>% 
+  distinct(Species, presence.perc) %>% 
+  cross_join(distinct(lvl3.numeric, traitName)) %>% 
+  left_join(lvl3.numeric %>% 
+              select(Species, traitName) %>% 
+              mutate(withData = TRUE), 
+             by = join_by(Species, traitName)) %>% 
+  filter(is.na(withData)) %>% 
+  select(-withData) 
+  
+# Estimated data coverage
+lvl3.numeric %>% 
+  filter(!is.na(traitValue)) %>% 
+  distinct(Species, presence.perc, traitName) %>% 
+  filter(presence.perc >= 3) %>% 
+  group_by(traitName) %>% 
+  summarise(ntaxa = n(), .groups = "drop") %>% 
+  arrange(-ntaxa)
+
+# Inspect some values outside the usual range of the major group. Many of these due to the low dry weights of the DFO database. Note that rates need to be standardized if inspected.
+global.means <- traits.species %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  group_by(traitName) %>% 
+  summarise(tval.mean = mean(traitValue),
+            tval.sd = sd(traitValue),
+            tval.n = n(),
+            tval.min = min(traitValue),
+            tval.max = max(traitValue),  .groups = "drop")
+
+AA <- lvl3.numeric %>% 
+  filter(presence.perc >= 3) %>% 
+  left_join(global.means, by = join_by(traitName)) %>% 
+  mutate(zScore = abs(traitValue - tval.mean) / tval.sd) %>% 
+  mutate(beyondRange = if_else(traitValue < tval.min |
+                                 traitValue > tval.max, TRUE, FALSE)) %>% 
+  filter(beyondRange == TRUE)
+  # filter(zScore > 4)
+```
+
+# Export the trait data
+```{r}
+# save(lvl3.cat.matrix, lvl3.num.matrix, lvl3.categorical, lvl3.numeric, zoop.bc.list, allomModels,
+#      file = here("data/BC_species_trait_matrices_20240604.RData"))
+```

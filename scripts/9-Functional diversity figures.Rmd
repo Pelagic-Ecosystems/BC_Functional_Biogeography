@@ -1,0 +1,304 @@
+---
+title: "Functional diversity maps"
+author: "Patrick Pata"
+date: "2024-06-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(rnaturalearth)
+library(marmap)
+library(mapdata)
+library(cowplot)
+library(here)
+library(ggtext)
+
+theme_set(theme_bw())
+
+# Load data
+load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
+
+# The calculated diversity metrics for 163 species
+load(here("data/fundiv_3721_163species_20240618.RData"))
+```
+
+
+# 2. Load results from file 8-Functional diversity indices.Rmd
+Using the relative abundance or biomass to calculate diversity produces similar results only for species richness and functional richness.
+```{r}
+fundiv.ind.biom <- fundiv.biom$functional_diversity_indices %>% 
+  rownames_to_column("Key") %>% 
+  select(Key, Sp.Ric = sp_richn, FRic = fric, FDis = fdis, FEve = feve, 
+         FDiv = fdiv, FOri = fori)  %>% 
+  left_join(select(zoopmeta, Key, Bioregion), by = "Key") %>% 
+  relocate(Bioregion) %>% 
+  column_to_rownames("Key")
+
+colnames(fundiv.ind.biom) <- c("Bioregion","Species Richness","Functional Richness",
+                 "Functional Dispersion","Functional Evenness",
+                 "Functional Divergence","Functional Originality")
+
+
+# Cross correlate metrics
+library(GGally)
+gp <- GGally::ggpairs(fundiv.ind.biom[,-1], 
+                      aes(color = fundiv.ind.biom$Bioregion, alpha = 0.2),
+                      lower = list(continuous = "smooth"), progress = FALSE) 
+gp +
+  scale_color_manual(values = clrs.bioregion) +
+  scale_fill_manual(values = clrs.bioregion)
+
+
+ggsave(filename = here("figures/fig_s8_fdiversity_bioregions_biomass.png"),
+    width = 15, height= 10, units = "in", dpi = 300, bg = "white")
+```
+
+# 3. Violin plots
+```{r}
+Metric.labs <- c("Species Richness","Functional Richness",
+                 "Functional Dispersion","Functional Evenness",
+                 "Functional Divergence","Functional Originality")
+names(Metric.labs) <- c("Sp.Ric","FRic","FDis","FEve","FDiv","FOri")
+
+
+fdivplots <- vector("list",2)
+count <- 1
+for (i in c(1:6)) {
+   fdivplots[[count]] <- ggplot(filter(fundiv.ind.biom.long, 
+                                        Metric == names(Metric.labs)[i]),
+                      aes(x = Bioregion, y = Value, fill = Bioregion)) +
+  geom_violin(aes(color = Bioregion), alpha = 0.6) + 
+  geom_boxplot(width = 0.3, color = "grey25", outlier.shape = NA) +
+  xlab("") +
+  ylab(Metric.labs[i]) +
+  scale_y_continuous(expand = c(0.01, 0.01)) +
+  theme(legend.position = "none",  
+        axis.title = element_text(size = 12),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.ticks.x = element_blank(),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        strip.text.x = element_text(size = 12)) +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) 
+  
+  count <- count + 1
+}
+
+legend_b1 <- get_legend(
+   fdivplots[[1]] + 
+    # guides(color = guide_legend(nrow = 2)) +
+    theme(legend.position = "bottom")
+)
+
+
+plot.violin <- plot_grid(
+  plot_grid(plotlist = fdivplots, nrow = 1, labels = c("c","d","e","f","g","h")),
+  legend_b1, 
+  ncol = 1, rel_heights = c(1, .1))
+
+# ggsave(file = here("figures/fig_7_fundiv_violin.png"),
+#        height = 4, width = 16, dpi = 300, bg = "white")
+```
+
+
+# 4. Mapped functional diversity indices
+## Base map
+```{r}
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+# get bathymetry data
+bathy = getNOAA.bathy(lon1 = -150, lon2 = -122, lat1 = 45, lat2 = 60, resolution = 1)
+# convert bathymetry to data frame
+bathy = fortify.bathy(bathy)
+
+basemap <- ggplot(data = world) +
+  geom_sf(fill = "#A9A9A9") + 
+  coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
+  # geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+  #              breaks=c(-100,-200,-500), linewidth=0.2, colour="black") +
+  xlab("") + ylab("") + theme_bw() + 
+  theme(legend.position = "bottom", 
+        legend.key.width = unit(0.8, "inch"),
+        # legend.key.height = unit(0.5, "inch"),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 12), 
+        plot.title = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12)) +
+  scale_x_continuous(breaks = c(-145,-140,-135,-130,-125))
+
+# save(bathy, basemap, file = here("data/backup_bathy_getNOAA_file.RData"))
+```
+
+
+## Calculate functional diversity values in grid cells
+```{r, fig.width=10, fig.height=7}
+res <- 0.2
+lon_grid <- seq(-145.25,-122,res)
+lat_grid <- seq(47, 56, res)
+
+
+bioregions.gridded <- zoopmeta %>%
+  select(Key,Bioregion,Longitude,Latitude) %>%
+  mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ],
+         lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) %>%
+  group_by(Bioregion, lon_bin, lat_bin) %>%
+  summarise(nsamples = n()) %>%
+  group_by(lon_bin, lat_bin) %>%
+  top_n(n=1) %>%
+  arrange(Bioregion)
+# There are duplicated grid points if grouped by bioregion
+bioregions.gridded$isdistinct <- duplicated(select(bioregions.gridded, lon_bin, lat_bin))
+
+
+fundiv.grid <- fundiv.ind.biom.long %>% 
+  left_join(select(zoopmeta, Key, Longitude, Latitude),
+            by = "Key") %>% 
+  mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ], 
+         lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) %>% 
+  group_by(Metric, lon_bin, lat_bin) %>%  # TODO check if grouping by bioregion
+  summarise(nsamples = n(),
+            Metric.Mean = mean(Value),
+            Metric.SD = sd(Value),
+            Metric.Min = min(Value),
+            Metric.Max = max(Value),
+            .groups = "drop")
+
+# Individually plot the metrics
+div.nsamp <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "Sp.Ric"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=nsamples),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Number of samples",
+                       trans = "log10",
+                       breaks = c(1,3,10,30,80)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black")
+
+# ggsave(file = here("figures/div_map_N_samples.png"),
+#        height = 6, width = 8, dpi = 300)
+
+div.spric <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "Sp.Ric"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Species Richness") +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black") +
+  ggtitle("Species Richness")
+
+# ggsave(file = here("figures/div_map_species_richness.png"),
+#        height = 6, width = 8, dpi = 300)
+
+
+
+div.fric <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "FRic"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Functional Richness",
+                       trans = "log10",
+                       breaks = c(0.02,0.05,0.1,0.2,0.4,0.6)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black")
+
+# ggsave(file = here("figures/div_map_functional_richness.png"),
+#        height = 6, width = 8, dpi = 300)
+
+
+div.fdis <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "FDis"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Functional Dispersion",
+                       breaks = c(0.1,0.2,0.3,0.4,0.5,0.6,0.7)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black")
+# ggsave(file = here("figures/div_map_functional_dispersion.png"),
+#        height = 6, width = 8, dpi = 300)
+
+
+div.feve <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "FEve"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Functional Evenness",
+                       # trans = "log10",
+                       breaks = c(0.1,0.2,0.3,0.4,0.5,0.6,0.7)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black")
+
+# ggsave(file = here("figures/div_map_functional_evenness.png"),
+#        height = 6, width = 8, dpi = 300)
+
+
+div.fdiv <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "FDiv"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Functional Divergence",
+                       trans = "log10",
+                       breaks = c(0.5,0.6,0.7,0.8,0.9)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z),
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black")
+# ggsave(file = here("figures/div_map_functional_divergence.png"),
+#        height = 6, width = 8, dpi = 300)
+
+
+div.fori <- basemap +
+  geom_tile(data = filter(fundiv.grid, 
+                          Metric == "FOri"),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Metric.Mean),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "Functional Originality",
+                       trans = "log10") +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500), size=c(0.2), colour="black") 
+# ggsave(file = here("figures/div_map_functional_originality.png"),
+#        height = 6, width = 8, dpi = 300)
+```
+
+
+# 5. Output merged figures
+```{r, fig.width=8}
+plot_grid(
+  plot_grid(div.fric, div.fdiv,
+            nrow = 1, labels = c("a","b")),
+  plot.violin,
+  ncol = 1,
+  rel_heights = c(1.5,1))
+
+ggsave(file = here("figures/fig_7_fundiv_to_annotate.png"),
+       height = 10, width = 16, dpi = 300, bg = "white")
+
+
+
+plot_grid(div.fdis, div.feve, div.fori,
+          align = "h", axis = "bt",
+          ncol = 1, labels = c("a","b","c"))
+
+ggsave(file = here("figures/fig_s9_fundiv_maps.png"),
+       height = 16, width = 8, dpi = 300, bg = "white")
+```
+

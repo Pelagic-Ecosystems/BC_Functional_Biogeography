@@ -1,0 +1,444 @@
+---
+title: "Functional group analysis"
+author: "Patrick Pata"
+date: "2023-10-24"
+output: html_document
+---
+
+For description of diversity indices and figures see: https://cmlmagneville.github.io/mFD/articles/mFD_general_workflow.html#test-correlation-between-functional-axes-and-traits 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Prepare data
+## Load libraries and data
+```{r}
+library(tidyverse)
+library(here)
+library(gawdis)
+library(data.table) # for calculating convex hulls
+library(ggrepel)
+library(ggtext)
+library(broom)
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+
+
+theme_set(theme_bw())
+
+load(here("data/BC_species_trait_matrices_20240604.RData"))
+rm(allomModels)
+
+
+# Assign colors to major groups
+majorgroup.colors <- data.frame(
+  majorgroup = c("Calanoid","Non-calanoid","Amphipod", "Mysid",
+                 "Euphausiid", "Ostracod","Polychaete","Pteropod",
+                 "Chaetognath","Appendicularian","Thaliacean",
+                 "Hydromedusae","Siphonophore","Ctenophore"),
+  color = c("blue4","dodgerblue","slateblue1", "seagreen3",
+                   "cyan3","forestgreen","lightpink2","green2",
+                   "darkorchid4","violetred","tomato1",
+                   "tan1","yellow2","red3"))
+                   
+
+fungrp.colors <- c("olivedrab3","darkolivegreen4","darkgreen","gold3",
+                  "lightcoral","magenta4","orchid",
+                  "darkorange2","steelblue2","turquoise3")
+                               
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+
+```
+
+## Transform trait matrix
+```{r,eval=TRUE}
+# 1. select traits for FG analysis 
+# 2. transform necessary traits
+# 3. combine with binary data
+# 4. filter species based on presence (run both and see if grouping is similar)
+# 5. setup groups and fuzzy variables
+
+# # List of species to include
+species.include.list <- zoop.bc.list %>%
+  # Exclude if rare
+  filter(presence.perc >= 1) %>%
+  #  Exclude because of high uncertainty in trait values. Especially for all polychaetes outside family Tomopteridae.
+  filter(Species %notin% c("Thalassocalyce inconstans","Corolla spectabilis")) %>%
+  filter(!(majorgroup == "Polychaete" & !grepl("Tomopteris",Species)))
+  
+  
+species.traits <- lvl3.num.matrix %>% 
+  select(Species, dryWeight, waterPWW, 
+         respirationRate_WSC, clearanceRate_WSC,
+         excretionRateN_WSDW,
+         ) %>% 
+  # log-transform some continuous trait values
+  mutate(dryWeight = log(dryWeight),
+         respirationRate_WSC = log(respirationRate_WSC),
+         excretionRateN_WSDW = log(excretionRateN_WSDW),
+         clearanceRate_WSC = log(clearanceRate_WSC)
+         ) %>% 
+  # Remove species with high uncertainty in trait estimates + rare species
+  # filter(Species %in% filter(zoop.bc.list, presence.perc >= 1)$Species) %>% 
+  filter(Species %in% species.include.list$Species) %>%
+  # combine with categorical data as fuzzy variables
+  left_join(lvl3.cat.matrix, by = "Species") %>% 
+  # select(-c(RM.broadcasting, RM.brooding)) %>%
+  column_to_rownames("Species") 
+
+# Identify species with incomplete trait information
+ii <- which(!is.na(rowMeans(species.traits)))
+# Analyze all species with complete trait information
+species.traits <- species.traits[ii,]
+
+trait.list <- data.frame(
+  traitName = c("dryWeight","waterPWW", 
+                "respirationRate_WSC", "clearanceRate_WSC",
+                "excretionRateN_WSDW", 
+                "RM.broadcasting","RM.brooding",
+                "FM.cruise","FM.current","FM.active.ambush","FM.passive.ambush",
+                "TG.herbivore","TG.omnivore","TG.carnivore","TG.detritivore")) %>% 
+  mutate(trait.group = traitName) %>% 
+  mutate(trait.group = if_else(grepl("FM.",trait.group),
+                               "feedingMode",trait.group),
+         trait.group = if_else(grepl("RM.",trait.group),
+                               "reproductionMode",trait.group),
+         trait.group = if_else(grepl("TG.",trait.group),
+                               "trophicGroup",trait.group))
+
+
+AA <- lvl3.numeric %>% 
+  filter(traitName %in% c("waterPWW","dryWeight",
+                "respirationRate_WSC", "clearanceRate_WSC",
+                "excretionRateN_WSDW")) %>% 
+  # distinct(Species, majorgroup, presence.perc) %>% 
+  filter(presence.perc > 1) %>% 
+  filter(valueConf >= 4) %>% 
+  group_by(Species, majorgroup, presence.perc) %>% 
+  summarise(ntraits = n())
+
+```
+
+
+## Identify colinearity between traits
+```{r, eval=FALSE, fig.height=5, fig.width=5}
+# Prepare a list of pairs of traits to correlate
+trait.cor.list <- trait.list[1:13,]
+trait.cor <- data.frame(trait1 = character(), trait2 = character())
+for (i in c(1:(nrow(trait.cor.list)-1))) {
+  for (j in c(i:nrow(trait.cor.list))) {
+    trait.cor <- trait.cor %>%
+      bind_rows(data.frame(trait1 = trait.cor.list$traitName[i],
+                           trait2 = trait.cor.list$traitName[j]))
+  }
+}
+trait.cor <- trait.cor %>%
+  filter(trait1 != trait2)
+
+# Loop through correlations
+cor.tests <- data.frame()
+for (i in c(1:nrow(trait.cor))){ #
+  AA <- species.traits %>%
+    rownames_to_column("Species") %>% 
+    pivot_longer(cols = -Species, names_to = "traitName", values_to = "traitValue") %>% 
+    filter(!is.na(traitValue)) %>% 
+    filter(traitName %in% c(trait.cor$trait1[i], trait.cor$trait2[i])) %>%
+    select(Species, traitName, traitValue) %>%
+    pivot_wider(names_from = traitName, values_from = traitValue) %>%
+    filter(!is.na(get(trait.cor$trait1[i])), !is.na(get(trait.cor$trait2[i]))) %>%
+    column_to_rownames("Species")
+
+  res <- data.frame(trait1 = colnames(AA[1]), trait2 = colnames(AA[2]),
+                    nspecies = nrow(AA), r = cor(AA)[1,2])
+
+  cor.tests <- cor.tests %>%
+    bind_rows(res)
+}
+
+
+# DIY correlation plot
+cor.tests <- cor.tests %>% 
+  rownames_to_column("analysis")
+cor.table <- cor.tests %>% 
+  bind_rows(dplyr::select(cor.tests, trait2 = trait1, trait1 = trait2, 
+                          everything())) %>% 
+   mutate(trait1 = factor(trait1, levels = trait.cor.list$traitName),
+         trait2 = factor(trait2, levels = trait.cor.list$traitName)) %>% 
+  mutate(trait1.num = as.numeric(trait1),
+         trait2.num = as.numeric(trait2)) %>% 
+  # retain only one side of the matrix
+  arrange(trait1, trait2) %>% 
+  group_by(analysis) %>% 
+  filter(row_number() == 1) %>% 
+# How many correlation coefficients >0.50 and nspecies > 100
+  mutate(r.mag = if_else(abs(r) > 0.5 & nspecies >= 0,
+         "s","w"))
+
+ggplot() +
+  # Correlation data
+  geom_point(data = cor.table, aes(x = trait1.num, y = trait2.num, color = r.mag,
+                        fill = r),
+             shape = 21, size = 12) +
+  geom_text(data = cor.table, aes(x = trait1.num, y = trait2.num, 
+                                  label = sprintf("%0.2f", round(r, digits = 2)))) +
+  # scale_color_gradient2(low = "blue3", mid = "white", high = "red2", 
+  #                      limits = c(-1,1), name = "corr coef") +
+  scale_color_manual(values = c("black",NA), guide = "none") +
+  scale_fill_gradient2(low = "blue3", mid = "white", high = "red2", 
+                       limits = c(-1,1), name = "r") +
+  
+  scale_x_discrete(limits = trait.cor.list$traitName) +
+  scale_y_reverse(breaks = 1:nrow(trait.cor.list), labels = trait.cor.list$traitName,
+                  limits = c(nrow(trait.cor.list)+0.5,0.5), expand = c(0, 0))+
+  scale_size_continuous(breaks = c(10,100,200,250), name = "N") +
+  # scale_y_discrete(limits = (trait.cor.list$traitName))  +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45,  hjust=1),
+        axis.title = element_blank(),
+        aspect.ratio = 1,
+        legend.position = "right",
+        legend.box = "vertical",
+        legend.key.height = unit(0.5,"in"),
+        legend.key.width=unit(0.3,"in"),
+        text = element_text(size = 16),
+        panel.grid.minor.y = element_blank(),
+        panel.background = element_rect(fill='white'),
+        plot.background = element_rect(fill='white', color=NA))
+
+# ggsave(filename = here("figures/BC_traits_correlation.png"),
+#     width = 10, height= 8, units = "in", dpi = 300)
+
+rm(trait.cor.list, trait.cor, cor.tests, cor.table, res, AA)
+```
+
+# 2. Trait dissimilarity between species
+
+The calculation of the dissimilarity between species according to trait values should be sensitive to the value type (numeric, binary, fuzzy coded categorical) and the relationship between similar traits (e.g., size: length, weight).
+
+## Gawdis optimized
+```{r, fig.width=6}
+set.seed(888)
+gaw.dist <- gawdis::gawdis(species.traits,
+                           w.type = "analytic", #use "optimized" if with NAs
+                           groups = trait.list$trait.group,
+                           fuzzy = c("feedingMode","trophicGroup",
+                                     "reproductionMode"),
+                           opti.maxiter = 1000)
+
+
+# Correlation between traits
+cor.mat <- attr(gaw.dist, "cor.mat")
+cormat.pval <- ggcorrplot::cor_pmat(cor.mat)
+ggcorrplot::ggcorrplot(cor.mat, hc.order = TRUE, 
+     outline.col = "white", p.mat = cormat.pval) #  insig = "blank")
+
+# ggsave(filename = here("figures/Gawdis_species_cormat.png"),
+#     width = 13, height= 12, units = "in", dpi = 300, bg = "white")
+
+
+gaw.stats <- data.frame(correls = attr(gaw.dist, "correls"),
+                        weights = attr(gaw.dist, "weights")) %>% 
+  rownames_to_column("traitName")
+# write.csv(gaw.stats, file = here("tables/gawdis_correls_weights.csv"),
+#           row.names = FALSE)
+```
+
+## Equal weights
+The equal weights gawdis tends to overestimate dissimilarity between species but the r statistic is quite high at r = 0.95.
+```{r, eval=FALSE}
+# # Apply weights within groups
+# Equal weights between all groups
+# # Note that groups.weight = TRUE can't be calculated when there are fuzzy variables.
+gawdis.equal <- gawdis::gawdis(species.traits,
+                               w.type = "equal",
+                               groups = trait.list$trait.group,
+                               # groups.weight = TRUE,
+                               fuzzy = c("feedingMode","trophicGroup",
+                                         "reproductionMode"))
+
+plot(gaw.dist, gawdis.equal)
+abline(0,1)
+
+mantel(gaw.dist, gawdis.equal)
+```
+
+# 3. Ordination of gaw.dist with mFD package
+MAD/absolute: absolute difference in distances
+RMSE/squared: more weight to large deviation
+Scaled: scaling distances in functional space to have the same maximum
+
+*NOTE* That the PCoA from the quality.fspaces() function is the same as calculating pcoa(gaw.dist, correction = "cailliez") 
+
+All 4 metrics determine 6 axes as the best representation of the trait space.
+```{r, fig.width=6}
+gaw.space <- mFD::quality.fspaces(sp_dist = gaw.dist,
+                             fdendro = "average",
+                             maxdim_pcoa = 10,
+                             deviation_weighting = c("absolute", "squared"),
+                             fdist_scaling = c(TRUE, FALSE))
+
+# The quality of the dimension reduction in relation to retaining the original trait dissimilarity
+gaw.space$quality_fspaces
+# retrieve the functional space associated with minimal quality metric: 
+apply(gaw.space$quality_fspaces, 2, which.min)
+
+# Plot quality metrics
+gaw.space$"quality_fspaces" %>%
+  tibble::as_tibble(rownames = "Funct.space") %>%
+  tidyr::pivot_longer(cols =! Funct.space, names_to = "quality_metric", values_to = "Quality") %>%
+  ggplot2::ggplot(ggplot2::aes(x = Funct.space, y = Quality, 
+                               color = quality_metric, shape = quality_metric)) +
+  ggplot2::geom_point() 
+
+mFD::quality.fspaces.plot(
+  fspaces_quality = gaw.space, 
+  quality_metric  = "mad",
+  fspaces_plot    = c("tree_average", "pcoa_2d", "pcoa_5d",'pcoa_9d'))
+
+# ggsave(filename = here("figures/Quality_functional_space_reduction.png"),
+#     width = 13, height= 10, units = "in", dpi = 300, bg = "white")
+```
+
+## Save gawdis analysis results
+```{r}
+save(gaw.space, gaw.dist, species.include.list,
+  file = here("data/fundiv_gawdis_results_20240729.RData")
+)
+```
+
+
+# 4. Coordinate-based functional diversity indices
+## Load data
+```{r}
+# load(here("data/fundiv_gawdis_results_20240729.RData"))
+
+# Community data
+load(here("data/key_fg_abundance_biomass_20240626.RData"))
+
+# Functional group data + traits
+load(here("data/functional_grouping_results_20240617.RData"))
+```
+
+## Relative abundance and biomass of each functional group between bioregions
+Note that this chunk takes a while to compute.
+```{r, fig.width=5}
+species.pcoa <- gaw.space$details_fspaces$sp_pc_coord[,c(1:5)]
+
+strip_fg <- ggh4x::strip_themed(background_x = ggh4x::elem_list_rect(
+  fill = gplots::col2hex(fungrp.colors)))
+
+# Create sites x functional group matrix
+bc.com.mat.abun <- zoop.bc.species.fun %>% 
+  select(Key, Species, Abundance.m2) %>%
+  # select(Key, Species, Biomass.mg.m2) %>%
+  pivot_wider(names_from = Species, values_from = Abundance.m2,
+              values_fill = 0) %>% 
+  column_to_rownames("Key")
+
+bc.com.mat.biom <- zoop.bc.species.fun %>% 
+  select(Key, Species, Biomass.mg.m2) %>%
+  # select(Key, Species, Biomass.mg.m2) %>%
+  pivot_wider(names_from = Species, values_from = Biomass.mg.m2,
+              values_fill = 0) %>% 
+  column_to_rownames("Key")
+
+
+fundiv.abun <- mFD::alpha.fd.multidim(sp_faxes_coord = species.pcoa,
+                       asb_sp_w = as.matrix(bc.com.mat.abun), verbose = FALSE)
+
+fundiv.biom <- mFD::alpha.fd.multidim(sp_faxes_coord = species.pcoa,
+                       asb_sp_w = as.matrix(bc.com.mat.biom), verbose = FALSE)
+
+
+# Taxonomic diversity + by functional group
+taxdiv <-  zoop.bc.species.fun %>% 
+  select(Key, Species, fungrp, Abundance.m2, Biomass.mg.m2) %>% 
+  group_by(Key) %>% 
+  mutate(Richness = specnumber(Abundance.m2),
+         Diversity.Shannon = diversity(Abundance.m2, index = "shannon"),
+         Diversity.Simpson = diversity(Abundance.m2, index = "simpson")) %>% 
+  mutate(Evenness = Diversity.Shannon/log(Richness)) %>% 
+  ungroup() %>% 
+  group_by(Key, fungrp) %>% 
+  mutate(Richness.fungrp = n()) %>% 
+  ungroup() %>% 
+  select(-c(Species, Abundance.m2, Biomass.mg.m2)) %>% 
+  distinct()
+  
+```
+
+## Distribution of functional diversity metrics between bioregions
+```{r}
+Metric.labs <- c("Species Richness","Functional Richness",
+                 "Functional Dispersion","Functional Evenness",
+                 "Functional Divergence","Functional Originality")
+names(Metric.labs) <- c("Sp.Ric","FRic","FDis","FEve","FDiv","FOri")
+
+zoopmeta <- zoop.bc.species.fun %>% 
+  distinct(Key, Bioregion)
+
+fundiv.ind.biom <- fundiv.biom$functional_diversity_indices %>% 
+  rownames_to_column("Key") %>% 
+  select(Key, Sp.Ric = sp_richn, FRic = fric, FDis = fdis, FEve = feve, 
+         FDiv = fdiv, FOri = fori)  %>% 
+  left_join(select(zoopmeta, Key, Bioregion), by = "Key") %>% 
+  relocate(Bioregion) %>% 
+  column_to_rownames("Key")
+
+
+fundiv.ind.biom.long <- fundiv.ind.biom %>% 
+  rownames_to_column("Key") %>% 
+  pivot_longer(cols = -c(Key,Bioregion), names_to = "Metric", values_to = "Value") %>% 
+  mutate(Metric = factor(Metric, 
+                         levels = c("Sp.Ric","FRic","FDis","FEve",
+                                    "FDiv","FOri"))) 
+
+# KW and Dunn test
+fundiv.ind.kw <- fundiv.ind.biom %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+fundiv.ind.dun <- fundiv.ind.biom %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted > 0.0005)
+
+
+save(fundiv.abun, fundiv.biom, taxdiv, fundiv.ind.biom, fundiv.ind.biom.long,
+fundiv.ind.kw, fundiv.ind.dun,
+     file = here("data/fundiv_3721_163species_20240618.RData"))
+```
+
+
+
+# Plot means as bar plots for summary figure
+```{r}
+fundiv.mean <- fundiv.ind.biom.long %>% 
+  filter(Metric != "Sp.Ric") %>% 
+  group_by(Bioregion, Metric) %>% 
+  summarise(Value = mean(Value), .groups = "drop")
+
+ggplot(fundiv.mean, aes(y = Metric, x = Value)) +
+  geom_bar(stat = "identity", aes(fill = Bioregion), alpha = 1) +
+  scale_x_continuous(limits = c(0,1), expand = c(0, 0),
+                     breaks = c(0,0.25,0.5,0.75,1),
+                     labels = c("0","0.25","0.5","0.75","1")) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(values = clrs.bioregion) +
+  theme(legend.position = "none") +
+  facet_wrap(~Bioregion, nrow = 1) 
+
+ggsave(file = here("figures/fig9/fig9_fundiv_mean.png"),
+       width = 8, height = 1.8, dpi = 300 )
+```
+
+
+
+
+
+
+

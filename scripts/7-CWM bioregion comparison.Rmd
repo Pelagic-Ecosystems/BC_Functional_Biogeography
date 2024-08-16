@@ -1,0 +1,201 @@
+---
+title: "CWM comparison of bioregions"
+author: "Patrick Pata"
+date: "2024-06-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(here)
+library(ggtext)
+library(scales)
+library(cowplot)
+library(broom)
+
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+theme_set(theme_bw())
+
+# Load data of samples with updated bioregions and functional groups
+load(here("data/key_fg_abundance_biomass_20240626.RData"))
+
+# Functional group data + traits
+load(here("data/functional_grouping_results_20240617.RData"))
+
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+```
+
+
+# 2. Calculate CWM and proportions of traits
+```{r}
+# Organize the trait data
+all.traits <- species.traits[,6:15] %>% 
+  rownames_to_column("Species") %>% 
+  left_join(traits.num, by = "Species") %>% 
+  pivot_longer(cols = -Species, 
+               names_to = "traitName",
+               values_to = "traitValue")
+
+zoop.163.density <- zoop.bc.species.fun %>% 
+  filter(Species %in% all.traits$Species) %>%  
+  group_by(Key, Tow.Depth, Bioregion, fungrp) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2), Abundance.m3 = sum(Abundance.m3),
+         Biomass.mg.m2 = sum(Biomass.mg.m2), Biomass.mg.m3 = sum(Biomass.mg.m3), 
+         .groups = "drop")
+
+zoop.163.cwm <- zoop.bc.species.fun %>% 
+  filter(Species %in% all.traits$Species) %>% 
+  left_join(all.traits, by = "Species") %>% 
+  rename(Trait = traitName) %>% 
+  # Calculate community weighted mean
+  group_by(Key, Bioregion, Trait) %>% 
+  summarise(CWM = weighted.mean(traitValue, Biomass.mg.m2),
+            .groups = "drop")
+```
+
+# 3. Plot figure
+```{r, fig.width=8}
+Trait.labs <- c("Body length","Dry weight","Water content",
+               "Carbon weight",
+               "Nitrogen weight","Phosphorus weight",
+               "Carbon content","Nitrogen content","Phosphorus content",
+               "C:N","C:P","N:P",
+               "Ind. respiration rate","Ws. respiration rate",
+               "Ind. ammonia\nexcretion rate","Ws. ammonia\nexcretion rate",
+               "Ind. phosphate\nexcretion rate",
+               "Ws. phosphate\nexcretion rate",
+               "Ind. clearance rate", "Ws. clearance rate",
+               "Prop. current feeders","Prop. cruise feeders",
+               "Prop. active\nambush feeders","Prop. passive\nambush feeders",
+               "Prop. herbivores","Prop. omnivores","Prop. carnivores",
+               "Prop. detritivores",
+               "Prop. broadcast\nspawning","Prop. brood\nspawning")
+names(Trait.labs) <- c("bodyLength","dryWeight","waterPWW",
+               "carbonWeight","nitrogenWeight","phosphorusWeight",
+               "carbonPDW","nitrogenPDW","phosphorusPDW","ratioCN","ratioCP","ratioNP",
+               "respirationRate","respirationRate_WSC",
+               "excretionRateN","excretionRateN_WSDW",
+               "excretionRateP", "excretionRateP_WSDW",
+               "clearanceRate","clearanceRate_WSC",
+               "current","cruise","active ambush","passive ambush",
+               "herbivore","omnivore","carnivore","detritivore",
+               "broadcasting","brooding")
+
+
+cwmplots <- vector("list",2)
+count <- 1
+for (i in c(1:30)) {
+  if (names(Trait.labs)[i] %in%  c("bodyLength","dryWeight","carbonWeight",
+                                   "nitrogenWeight","phosphorusWeight",
+                                   "respirationRate","excretionRateN",
+                                   "excretionRateP","clearanceRate",
+                                   "respirationRate_WSC","excretionRateN_WSDW",
+                                   "excretionRateP_WSDW","clearanceRate_WSC",
+                                   "FM.passive.ambush","TG.detritivore")) {
+    cwmplots[[count]] <- ggplot(filter(zoop.163.cwm, 
+                                       Trait == names(Trait.labs)[i]) ,
+                                aes(x = Bioregion, y = CWM, fill = Bioregion)) +
+      geom_violin(aes(color = Bioregion), alpha = 0.6) +
+      geom_boxplot(width = 0.3, color = "grey25", outlier.shape = NA) +
+      # geom_boxplot(color = "grey25", outlier.shape = 4) +
+      scale_color_manual(values = c("#004DFB","#FB20CA","#FFA500","#20FF00")) +
+      scale_fill_manual(values = c("#004DFB","#FB20CA","#FFA500","#20FF00")) +
+      scale_y_log10() +
+      ylab(Trait.labs[i]) +
+      theme(legend.position = "none",
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            # axis.title.y = element_blank(),
+            axis.title.x = element_blank())
+  } else {
+    cwmplots[[count]] <- ggplot(filter(zoop.163.cwm, 
+                                       Trait == names(Trait.labs)[i]),
+                                aes(x = Bioregion, y = CWM, fill = Bioregion)) +
+      geom_violin(aes(color = Bioregion), alpha = 0.6) +
+      geom_boxplot(width = 0.3, color = "grey25", outlier.shape = NA) +
+      # geom_boxplot(color = "grey25", outlier.shape = 4) +
+      scale_color_manual(values = c("#004DFB","#FB20CA","#FFA500","#20FF00")) +
+      scale_fill_manual(values = c("#004DFB","#FB20CA","#FFA500","#20FF00")) +
+      # scale_y_log10() +
+      ylab(Trait.labs[i]) +
+      xlab("") +
+      theme(legend.position = "none",
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  }
+  count <- count + 1
+}
+
+
+legend_b1 <- get_legend(
+   cwmplots[[1]] + 
+    theme(legend.position = "bottom")
+)
+
+plot_grid(
+  plot_grid(plotlist = cwmplots, 
+            ncol = 6, align = "hv",
+            labels = c("a","b","c","d","e","f","g","h","i","j",
+                       "k","l","m","n","o","p","q","r","s","t",
+                       "u","v","w","x","y","z",
+                       "aa","bb","cc","dd")),
+  legend_b1,
+  ncol = 1, rel_heights = c(1, .07)
+)
+
+ggsave(filename = here("figures/fig_6_CWM_bioregions_to_annotate.png"),
+       width = 12, height= 12, units = "in", dpi = 600, bg = "white")
+```
+
+
+# 4. Significance testing between bioregions + table
+```{r}
+cwm.kw <- zoop.163.cwm %>% 
+  group_by(Trait) %>% 
+  do(tidy(kruskal.test(x=.$CWM, g =.$Bioregion)))
+
+cwm.dunn <- zoop.163.cwm %>% 
+  group_by(Trait) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$CWM, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005) %>% 
+  arrange(match(Trait, names(Trait.labs)))
+
+
+cwm.sum <- zoop.163.cwm %>% 
+  group_by(Bioregion, Trait) %>% 
+  summarise(ValMean = mean(CWM),
+            ValSD = sd(CWM), 
+            ValMedian = median(CWM),
+            ValIQR = IQR(CWM),
+            ValMin = min(CWM),
+            ValMax = max(CWM),
+            ValN = n(),
+            .groups = "drop") %>% 
+  arrange(Bioregion, Trait) 
+
+
+# Per bioregion and functional group
+cwm.table <- cwm.sum %>% 
+  select(Bioregion, Trait, ValMean, ValSD) %>% 
+  mutate(ValText = if_else(Trait %in% c("detritivore","phosphorusWeight"), 
+           paste(round(ValMean,3),"\u00b1",round(ValSD,3)),
+           paste(round(ValMean,2),"\u00b1",round(ValSD,2)))) %>% 
+  select(-c(ValMean, ValSD)) %>% 
+  pivot_wider(names_from = Bioregion,
+              values_from = ValText) %>% 
+  arrange(match(Trait, names(Trait.labs)))
+cwm.table$Trait <- Trait.labs
+
+write.csv(cwm.table,
+          file = here("tables/cwm_bioregions_to_annotate.csv"), row.names = FALSE)
+```
+

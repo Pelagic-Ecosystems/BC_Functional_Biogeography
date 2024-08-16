@@ -1,0 +1,189 @@
+---
+title: "Process regionalized BC species list"
+author: "Patrick Pata"
+date: '2023-05-02'
+output: html_document
+---
+
+This file updates the species list and nomenclature in the analysis of the associated manuscript. This also revises the regionalized zooplankton data files from Pata et al. 2022 to fit the species used in the functional ecology analysis. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the species list changes, please uncomment the data saving scripts in line 181. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and files
+```{r}
+library(tidyverse)
+library(here)
+library(worrms)
+set_here(path = "..")
+`%notin%` = negate(`%in%`)
+
+# The original BC dataset
+load(here("data/zoop_data_regionalized_10252021.RData"))
+
+# taxonomy table
+taxonomy <- read.csv(here("data/trait_database_raw/taxonomy_table_20230628.csv")) %>% 
+  distinct(taxonID, .keep_all = TRUE)
+
+```
+
+# 2. Revise the entire BC zoop dataset to match taxonIDs with trait database
+```{r}
+# List the species originally analyzed in the taxonomic regionalization paper
+zoop.bc.list <- sp.abund.list %>% 
+  # add taxonID, majorgroup, aphiaID
+  left_join(select(taxonomy, Species = scientificName,
+                   taxonID, majorgroup, aphiaID), 
+            by = "Species")
+
+# List Species names that don't match the scientific names in the trait database
+AA <- zoop.bc.list %>% 
+  filter(is.na(taxonID)) %>% 
+  distinct(Species, .keep_all = TRUE) %>% 
+  arrange(Species)
+
+
+# Get aphiaIDs from WORMS
+atablenow <- wm_records_taxamatch(name = AA$Species[1])
+atablenow <- plyr::ldply(atablenow, data.frame)
+atablenow <- atablenow[-1,]
+
+for (sp in AA$Species) {
+  x <- tryCatch(wm_records_taxamatch(name = sp),
+                error = function(e)
+                print(paste("No aphia search for",sp)))
+  if (is.list(x) == TRUE) {
+    x <- plyr::ldply(x, data.frame)
+    x$name <- sp
+    x <- x %>% 
+      filter(kingdom == "Animalia")
+    
+    if (nrow(x) > 1){
+      print(sp)
+      print(x$AphiaID)
+      x <- x[1,]
+    }
+    
+    atablenow <- rbind(atablenow, x)
+  }
+}
+# atablenow <- rename(atablenow, name = scientificName)
+atablenow <- rename(atablenow, aphiaID = valid_AphiaID,
+                    verbatimScientificName = scientificname,
+                    scientificName = valid_name)
+
+# Revise the species names in the zoop abundance dataset to match the trait dataset names. With manual revisions of species to get trait values.
+zoop.bc.list <- zoop.bc.list %>% 
+  left_join(select(atablenow, Species = name, trait.db.name = scientificName),
+            by = "Species") %>% 
+  mutate(trait.db.name = if_else(is.na(trait.db.name),
+                                 Species, trait.db.name)) %>% 
+  select(-c(majorgroup, taxonID, aphiaID)) %>% 
+  relocate(Species, trait.db.name) %>% 
+  
+  # Scina keilhacki is Scina rattrayi keilhacki in trait dataset (subspecies level). The species level is Scina rattrayi with taxonID 215.
+  mutate(trait.db.name = if_else(trait.db.name == "Scina keilhacki", 
+                           "Scina rattrayi keilhacki", trait.db.name)) %>% 
+  # Acartia arbruta was previously identified as Acartia tonsa which has the trait values, thus for this analysis, the scientific name is reverted back.
+  mutate(trait.db.name = if_else(trait.db.name == "Acartia arbruta",
+                           "Acartia (Acanthacartia) tonsa", trait.db.name)) %>% 
+  # Cancer antennarius (red rock crab) is Romaleon antennarium
+  mutate(trait.db.name = if_else(trait.db.name == "Cancer antennarius",
+                                 "Romaleon antennarium", trait.db.name)) %>% 
+  # Tiaropsidium multicirrata is Tiaropsis multicirrata
+  mutate(trait.db.name = if_else(trait.db.name == "Tiaropsidium multicirrata",
+                                 "Tiaropsis multicirrata", trait.db.name)) %>% 
+  # Merge the trait database taxonomy again and check correspondence
+  left_join(select(taxonomy, trait.db.name = scientificName,
+                   taxonID, majorgroup, aphiaID, taxonRank), by = "trait.db.name")
+
+# List taxa that are not in the trait database
+AA2 <- zoop.bc.list %>% 
+  filter(is.na(taxonID)) %>% 
+  distinct(Species, .keep_all = TRUE) %>% 
+  arrange(Species)
+
+# Add the column of trait.db.names to the zooplankton community data
+zoop.bc <- zoop_sub %>% 
+  left_join(select(zoop.bc.list, Species, trait.db.name, taxonID,
+                   majorgroup, taxonRank),
+            by = "Species") %>% 
+  relocate(trait.db.name, taxonID, .after = Species)
+
+zoop.bc.excluded <- zoop_sub_excluded %>% 
+  left_join(select(zoop.bc.list, Species, trait.db.name, taxonID,
+                   majorgroup, taxonRank),
+            by = "Species") %>% 
+  relocate(trait.db.name, taxonID, .after = Species)
+
+# zoop.bc.ex <- zoop_sub_excluded %>% 
+#   left_join(select(zoop.bc.list, Species, trait.db.name, taxonID),
+#             by = "Species") %>% 
+#   relocate(trait.db.name, taxonID, .after = Species) %>% 
+#   distinct(Species, trait.db.name)
+
+```
+
+# 3. For taxa which were not analyzed at the species level for the BC bioregionalization, determine what are the species identified in BC for assigning the group-level trait values. Meroplankton are excluded in the trait analysis.
+```{r}
+zoop.bc.list.notspecies <- zoop.bc %>% 
+  filter(taxonRank %notin% c("Species", "Subspecies")) %>% 
+  group_by(taxonID, Species, trait.db.name, majorgroup, Taxa.Level, taxonRank) %>% 
+  summarise(N = n(), abun = mean(Abundance.m2), biom = mean(Biomass.mg.m2),
+            .groups = "drop") %>% 
+  arrange(-N) %>% 
+  filter(!is.na(taxonID) & majorgroup != "") 
+
+# Set Aglantha taxa level to G
+zoop.bc.list.notspecies <- zoop.bc.list.notspecies %>% 
+  mutate(Taxa.Level = if_else(Species == "Aglantha", "G", Taxa.Level))
+taxalist <- taxalist %>% 
+  mutate(Taxa.Level = if_else(Species == "Aglantha", "G", Taxa.Level))
+
+# Search taxalist dataframe for species names under each of the group-level names
+bc.not.at.species.list <- data.frame()
+for (i in c(1:nrow(zoop.bc.list.notspecies))) {
+  taxa.under <- taxalist %>% 
+    filter(Taxa.Name == zoop.bc.list.notspecies$Species[i]) %>% 
+    distinct(Species) %>% 
+    rename(taxa.under.name = Species)
+  bc.not.at.species.list <- bc.not.at.species.list %>% 
+    bind_rows( bind_cols(zoop.bc.list.notspecies[i, 1:6], taxa.under ))
+}
+
+# Check if the species names are in the trait database
+bc.not.at.species.list <- bc.not.at.species.list %>% 
+  left_join(select(taxonomy, taxonID.under = taxonID, 
+                   taxa.under.name = verbatimScientificName),
+            by = "taxa.under.name") %>% 
+  left_join(select(taxonomy, taxonID.under = taxonID, 
+                   taxa.under.name = scientificName),
+            by = "taxa.under.name") %>% 
+  mutate(taxonID.under = if_else(is.na(taxonID.under.x), 
+                                 taxonID.under.y, taxonID.under.x)) %>% 
+  select(-c(taxonID.under.x, taxonID.under.y))
+
+# # Global species pool that is not considered in the analyzed data
+# global.species.list <- taxonomy %>% 
+#   filter(taxonID %notin% zoop.bc.list$taxonID) %>% 
+#   filter(taxonID %notin% bc.not.at.species.list$taxonID)
+
+```
+
+
+# 4. Export files
+```{r}
+# Also export the taxonomy table for converting species-stage names to the curated regionalization species names
+taxalist.dfo.database <- taxalist
+
+# save(zoop.bc, zoop.bc.excluded, zoop.bc.list, bc.not.at.species.list,
+#      taxonomy, zoopmeta, clrs.bioregion, taxalist.dfo.database,
+#      zoopdiversity, zoopenvi, 
+#      file = here("data/zoop_data_regionalized_annotated_20231018.RData"))
+
+```
+
+
+
+
