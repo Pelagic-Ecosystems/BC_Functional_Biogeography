@@ -5,7 +5,7 @@ date: '2023-05-02'
 output: html_document
 ---
 
-This file updates the species list and nomenclature in the analysis of the associated manuscript. This also revises the regionalized zooplankton data files from Pata et al. 2022 to fit the species used in the functional ecology analysis. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the species list changes, please uncomment the data saving scripts in line 181. 
+This file updates the species list and nomenclature in the analysis of the associated manuscript. This also revises the regionalized zooplankton data files from Pata et al. 2022 to fit the species used in the functional ecology analysis. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the species list changes, please uncomment the data saving scripts in line 166 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -20,7 +20,7 @@ set_here(path = "..")
 `%notin%` = negate(`%in%`)
 
 # The original BC dataset
-load(here("data/zoop_data_regionalized_10252021.RData"))
+load(here("data/restricted_data/zoop_data_regionalized_10252021.RData"))
 
 # taxonomy table
 taxonomy <- read.csv(here("data/trait_database_raw/taxonomy_table_20230628.csv")) %>% 
@@ -30,7 +30,7 @@ taxonomy <- read.csv(here("data/trait_database_raw/taxonomy_table_20230628.csv")
 
 # 2. Revise the entire BC zoop dataset to match taxonIDs with trait database
 ```{r}
-# List the species originally analyzed in the taxonomic regionalization paper
+# List the species originally analyzed in the taxonomic regionalization paper (Pata et al. 2022)
 zoop.bc.list <- sp.abund.list %>% 
   # add taxonID, majorgroup, aphiaID
   left_join(select(taxonomy, Species = scientificName,
@@ -68,7 +68,7 @@ for (sp in AA$Species) {
     atablenow <- rbind(atablenow, x)
   }
 }
-# atablenow <- rename(atablenow, name = scientificName)
+
 atablenow <- rename(atablenow, aphiaID = valid_AphiaID,
                     verbatimScientificName = scientificname,
                     scientificName = valid_name)
@@ -116,13 +116,6 @@ zoop.bc.excluded <- zoop_sub_excluded %>%
                    majorgroup, taxonRank),
             by = "Species") %>% 
   relocate(trait.db.name, taxonID, .after = Species)
-
-# zoop.bc.ex <- zoop_sub_excluded %>% 
-#   left_join(select(zoop.bc.list, Species, trait.db.name, taxonID),
-#             by = "Species") %>% 
-#   relocate(trait.db.name, taxonID, .after = Species) %>% 
-#   distinct(Species, trait.db.name)
-
 ```
 
 # 3. For taxa which were not analyzed at the species level for the BC bioregionalization, determine what are the species identified in BC for assigning the group-level trait values. Meroplankton are excluded in the trait analysis.
@@ -163,27 +156,18 @@ bc.not.at.species.list <- bc.not.at.species.list %>%
   mutate(taxonID.under = if_else(is.na(taxonID.under.x), 
                                  taxonID.under.y, taxonID.under.x)) %>% 
   select(-c(taxonID.under.x, taxonID.under.y))
-
-# # Global species pool that is not considered in the analyzed data
-# global.species.list <- taxonomy %>% 
-#   filter(taxonID %notin% zoop.bc.list$taxonID) %>% 
-#   filter(taxonID %notin% bc.not.at.species.list$taxonID)
-
 ```
 
 
 # 4. Export files
 ```{r}
-# Also export the taxonomy table for converting species-stage names to the curated regionalization species names
-taxalist.dfo.database <- taxalist
+# taxalist.dfo.database <- taxalist # Also export the taxonomy table for converting species-stage names to the curated regionalization species names
 
 # save(zoop.bc, zoop.bc.excluded, zoop.bc.list, bc.not.at.species.list,
 #      taxonomy, zoopmeta, clrs.bioregion, taxalist.dfo.database,
 #      zoopdiversity, zoopenvi, 
-#      file = here("data/zoop_data_regionalized_annotated_20231018.RData"))
+#      file = here("data/restricted_data/zoop_data_regionalized_annotated_20231018.RData"))
 
 ```
-
-
 
 

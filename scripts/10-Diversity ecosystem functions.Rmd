@@ -1,0 +1,458 @@
+---
+title: "Diversity and ecosystem functions"
+author: "Patrick Pata"
+date: "2024-11-12"
+output: html_document
+---
+
+This file contains the exploratory analysis that relates the functional diversity indices with ecosystem functioning as proxied by the community level trait values.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(cowplot)
+library(here)
+library(ggtext)
+library(vegan)
+library(ggrepel)
+theme_set(theme_bw())
+
+
+# Load data
+load(here("data/BC_bioregionalization_metadata.RData"))
+load(here("data/fundiv_3721_163species_20240618.RData"))
+load(here("data/community_metrics_3721_163species_20250217.RData"))
+
+geomean <- function(x) {  exp(mean(log(x), na.rm = TRUE))  }
+`%notin%` <- Negate(`%in%`)
+
+fungrp.colors <- c("turquoise3", "steelblue2","darkorange2",
+                   "orchid","magenta4","lightcoral",
+                   "gold3","darkgreen","darkolivegreen4",
+                   "olivedrab3")
+                   
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+
+rm(zoop.163.ctotal)
+```
+
+# 2. Prepare the BEF matrix
+```{r}
+zoop.163.totals <- zoop.163.ctotal %>% 
+  filter(Trait %in% c("totalCarbonWeight", "totalRespirationRate",
+                      "totalExcretionRateN", "totalExcretionRateP",
+                      "totalClearanceRate")) %>% 
+  pivot_wider(names_from = "Trait", values_from = "CTotal") %>% 
+  rename(totalCarbon = totalCarbonWeight)
+
+B.mat <- fundiv.ind.biom %>% 
+  rownames_to_column("Key")
+
+EF.mat <- zoop.163.cwm %>% 
+  filter(Trait %in% c("ratioCN", "waterPWW")) %>% 
+  pivot_wider(names_from = Trait, values_from = CWM) %>% 
+  left_join(zoop.163.totals, by = join_by(Key, Bioregion))
+
+BEF.mat <- left_join(B.mat, EF.mat,
+                     by = join_by(Key, Bioregion))
+
+# Subset the matrix for curve fitting
+BEF.2.mod <- BEF.mat %>% 
+  mutate(logRespiration = log10(totalRespirationRate),
+         logExcretionN = log10(totalExcretionRateN)
+         ) %>% 
+  select(-c(totalCarbon:totalClearanceRate)) %>% 
+  pivot_longer(cols = c(Sp.Ric:FOri),
+               names_to = "Diversity", values_to = "Index") %>% 
+  pivot_longer(cols = c(ratioCN:logExcretionN),
+               names_to = "CTV", values_to = "Value") %>% 
+  mutate(Diversity = factor(Diversity,
+                            levels = c("Sp.Ric", "FRic", "FDis", 
+                                       "FEve", "FDiv", "FOri")))
+```
+
+
+# 3. Curve fitting
+
+Selection based on AIC. Using AIC reduces overfitting and is appropriate here because we are comparing between alternative models with different structures. The pseudo-R2 are also extracted because these are more familiar to interpret (only because it is scaled from 0 to 1). Generally, the relative differences between BEF pairs are not similar between these two metrics of model performance. Although highest pseudo R2 are from low AIC (better model).
+
+## Setup the model fitting function
+```{r}
+# The general model fitting function 
+fit_models <- function(data) {
+  models <- list(
+    linear = lm(Value ~ Index, data = data),
+    # quadratic = lm(Value ~ Index + I(Index^2), data = data),
+    logarithmic = tryCatch(
+      nls(Value ~ a + b * log(Index), data = data, start = list(a = 1, b = 1)),
+      error = function(e) NULL
+    ),
+    power = tryCatch(
+      nls(Value ~ a * Index^b, data = data, start = list(a = 1, b = 1)),
+      error = function(e) NULL
+    ),
+    saturating = tryCatch(
+      nls(Value ~ a * Index / (b + Index), data = data, start = list(a = 1, b = 1)),
+      error = function(e) NULL
+    )
+  )
+  
+  results <- lapply(names(models), function(model_name) {
+    model <- models[[model_name]]
+    if (is.null(model)) return(NULL)
+    
+    # Extract coefficients and standard errors
+    if ("lm" %in% class(model)) {
+      coef_summary <- summary(model)$coefficients
+      stderr <- summary(model)$sigma
+    } else {
+      coef_summary <- summary(model)$parameters
+      stderr <- sqrt(sum(resid(model)^2) / (nrow(data) - length(coef(model))))
+    }
+    
+    data.frame(
+      model_type = model_name,
+      aic = AIC(model),
+      stderr = stderr,
+      # Pseudo R2 is residual sum of squares as proportion of total varation
+      r2 = ifelse("lm" %in% class(model), summary(model)$r.squared,
+                  1 - sum(resid(model)^2) / sum((data$Value - mean(data$Value))^2)),
+      coefficients = paste(names(coef(model)), coef(model), 
+                           sep = "=", collapse = "; "),
+      standard_errors = paste(names(coef(model)), 
+                              coef_summary[, "Std. Error"], 
+                              sep = "=", collapse = "; ")
+    )
+  })
+  
+  do.call(rbind, results)
+}
+
+```
+
+
+## Global analysis
+```{r}
+# Fit models for each combination of Diversity and CTV
+results.global <- BEF.2.mod %>%
+  group_by(Diversity, CTV) %>%
+  summarise(
+    model_summaries = list(fit_models(cur_data())),
+    minX = min(Index),
+    maxX = max(Index),
+    .groups = "drop"
+  ) %>%
+  unnest(model_summaries) %>%
+  group_by(Diversity, CTV) %>%
+  slice_min(aic) %>%  # Select the model with the lowest AIC for each group
+  rename(best_model = model_type)  # Add the best model name as a separate column
+
+# # Determine instances when the r2 >= 0.1 
+# # Log carbon and log respiration will produce similar curves so just focus on log carbon in the main figure and put log respiration in the supplementary figure.
+# results.global.high <- results.global %>% 
+#   filter(r2 >= 0.1)
+```
+
+
+## Bioregion-specific analysis
+```{r}
+# Fit models for each combination of Bioregion and CTV
+results.bioregion <- BEF.2.mod %>%
+  group_by(Bioregion, Diversity, CTV) %>%
+  summarise(
+    model_summaries = list(fit_models(cur_data())),
+    minX = min(Index),
+    maxX = max(Index),
+    .groups = "drop"
+  ) %>%
+  unnest(model_summaries) %>%
+  group_by(Bioregion, Diversity, CTV) %>%
+  slice_min(aic) %>%  # Select the model with the lowest AIC for each group
+  rename(best_model = model_type) %>%  # Add the best model name as a separate column
+  ungroup()
+
+# # Add a column for the global r2 and filter accordingly to only instances of R2 >= 0.1
+# results.bioregion.high <- results.bioregion %>%
+#   left_join(select(results.global, Diversity, CTV, r2.global = r2),
+#             by = join_by(Diversity, CTV)) %>%
+#   filter(r2.global >= 0.1)
+```
+
+# 4. Extra: Visual residual analysis
+This is for visualizing all model types for one BEF combination. Change the diversity metric and CTV inside the filter() function. Residuals should be random around zero and for observed vs fitted, better if around the 1:1 line. 
+```{r, eval=FALSE}
+library(ggdist)
+
+plot_data <- BEF.2.mod %>%
+  filter(Diversity == "FRic", CTV == "logRespiration")
+  
+fit_results <- fit_models(plot_data)
+
+models <- list(
+  linear = lm(Value ~ Index, data = plot_data),
+  logarithmic = tryCatch(
+    nls(Value ~ a + b * log(Index), data = plot_data, start = list(a = 1, b = 1)),
+    error = function(e) NULL
+  ),
+  power = tryCatch(
+    nls(Value ~ a * Index^b, data = plot_data, start = list(a = 1, b = 1)),
+    error = function(e) NULL
+  ),
+  saturating = tryCatch(
+    nls(Value ~ a * Index / (b + Index), data = plot_data, start = list(a = 1, b = 1)),
+    error = function(e) NULL
+  )
+)
+
+
+plot_model_diagnostics <- function(data, model) {
+  if (is.null(model)) {
+    cat("Model is NULL, skipping diagnostics.\n")
+    return(NULL)
+  }
+  
+  # Extract fitted values and residuals
+  fitted_values <- fitted(model)
+  residuals <- resid(model)
+  
+  # Create a data frame for plotting
+  diag_data <- data.frame(
+    Observed = data$Value,
+    Fitted = fitted_values,
+    Residuals = residuals
+  )
+  
+  # Plot 1: Residuals vs Fitted
+  residual_plot <- ggplot(diag_data, aes(x = Fitted, y = Residuals)) +
+    geom_point(color = "blue", alpha = 0.6) +
+    geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+    labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+    theme_minimal()
+  
+  # Plot 2: Fitted vs Observed
+  fitted_vs_observed_plot <- ggplot(diag_data, aes(x = Observed, y = Fitted)) +
+    geom_point(color = "green", alpha = 0.6) +
+    geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+    labs(title = "Fitted vs Observed", x = "Observed Values", y = "Fitted Values") +
+    theme_minimal()
+  
+  # Plot 3: Density distribution of residuals
+  residual_density_plot <- ggplot(diag_data, aes(x = Residuals)) +
+    geom_density(color = "blue", fill = "lightblue", alpha = 0.5) +
+    stat_halfeye(aes(y = 0), orientation = "horizontal") +
+    labs(title = "Density Distribution of Residuals", x = "Residuals", y = "Density") +
+    theme_minimal()
+  
+  # Combine all plots using cowplot
+  combined_plot <- plot_grid(
+    residual_plot, 
+    fitted_vs_observed_plot, 
+    residual_density_plot, 
+    ncol = 2, 
+    labels = c("A", "B", "C"),
+    label_size = 14
+  )
+  
+  # Display the combined plot
+  print(combined_plot)
+}
+
+
+# Plot diagnostics for each fitted model
+for (model_name in names(models)) {
+  cat("Diagnostics for model:", model_name, "\n")
+  plot_model_diagnostics(plot_data, models[[model_name]])
+}
+```
+
+# 5. Output BEF
+Export figure for main text and figure for supplementary materials
+
+Select which BEF pairs to plot
+Main figure: (1) FRic vs logC, (2) FDis vs logC, (3) FDis vs Water PWW, (4) FDiv vs ratioCN
+Supp figure: (1) SpRic vs logC, (2) SpRic vs logresp,(3) FRic vs logResp, (4) FDis vs logResp
+
+## Fig 6 and Fig S10
+```{r}
+# Functions for adding the curves in the plot
+addFitCurve<- function(p, row, line_color) {
+   coefficients <- sapply(strsplit(row$coefficients, ";")[[1]], function(x) {
+    as.numeric(strsplit(x, "=")[[1]][2])
+  })
+  model_type <- row$best_model
+  limits <- c(row$minX, row$maxX)
+  
+  if (model_type == "linear") {
+    p <- p + stat_function(fun = function(x) coefficients[1] + coefficients[2] * x, 
+                           xlim = limits,
+                           size = 2, alpha = 0.8, color = line_color)
+  } else if (model_type == "logarithmic") {
+    p <- p + stat_function(fun = function(x) coefficients[1] + coefficients[2] * log(x),
+                           xlim = limits,
+                           size = 2, alpha = 0.8,  color = line_color)
+  } else if (model_type == "power") {
+    p <- p + stat_function(fun = function(x) coefficients[1] * x^coefficients[2], 
+                           xlim = limits,
+                           size = 2, alpha = 0.8,  color = line_color)
+  } else if (model_type == "saturating") {
+    p <- p + stat_function(fun = function(x) coefficients[1] * x / (coefficients[2] + x),
+                           xlim = limits,
+                           size = 2, alpha = 0.8,  color = line_color)
+  }
+  return(p)
+}
+
+# Function for plotting the data distribution and the fitted curves
+plot_curves <- function(data, results.global, results.bioregion,
+                        Div.val, CTV.val,
+                        Div.Text = "",
+                        CTV.Text = "") {
+  # Subset data for this subplot
+  plot_data <- data %>%
+    filter(Diversity == Div.val, CTV == CTV.val)
+  
+  # Base plot
+  p <- ggplot(plot_data, aes(x = Index, y = Value, color = Bioregion)) +
+    geom_point(size = 1, alpha = 0.1) +
+    scale_color_manual(values = clrs.bioregion) +  
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+          legend.position = "none") +
+    xlab(Div.Text) + ylab(CTV.Text)
+  
+
+  # Bioregion-specific curves
+  row <- results.bioregion %>%
+    filter(Diversity == Div.val, CTV == CTV.val)
+
+  for (i in 1:nrow(row)) {
+    p <- addFitCurve(p, row[i,], clrs.bioregion[i])
+  }
+
+  
+  # Global curve
+  row <- results.global %>% 
+    filter(Diversity == Div.val, CTV == CTV.val)
+  
+  p <- addFitCurve(p, row, "black")
+  
+  
+  return(p)
+}
+
+# Main figure
+p1 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FRic", CTV.val = "logRespiration",
+                  Div.Text = "Functional Richness",
+                  CTV.Text = "Total Respiration Rate")
+
+
+p2 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FDis", CTV.val = "logRespiration",
+                  Div.Text = "Functional Dispersion",
+                  CTV.Text = "Total Respiration Rate")
+
+
+
+p3 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FDis", CTV.val = "waterPWW",
+                  Div.Text = "Functional Dispersion",
+                  CTV.Text = "CWM Water content")
+
+
+p4 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FDiv", CTV.val = "ratioCN",
+                  Div.Text = "Functional Divergence",
+                  CTV.Text = "CWM C:N")
+
+cowplot::plot_grid(p1,p2,p3,p4, labels = "auto")
+
+ggsave(filename = here("figures/fig_6_BEF.png"),
+       width = 8, height= 7, units = "in", dpi = 600, bg = "white")
+
+
+
+# Supplementary figure
+p1 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "Sp.Ric", CTV.val = "logRespiration",
+                  Div.Text = "Species Richness",
+                  CTV.Text = "Total Respiration Rate")
+
+
+p2 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FRic", CTV.val = "logExcretionN",
+                  Div.Text = "Functional Richness",
+                  CTV.Text = "Total Ammonium Excretion Rate")
+
+
+# Examples of poor model performance
+p3 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FEve", CTV.val = "logRespiration",
+                  Div.Text = "Functional Evenness",
+                  CTV.Text = "Total Respiration Rate")
+
+p4 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
+                  Div.val = "FRic", CTV.val = "waterPWW",
+                  Div.Text = "Functional Richness",
+                  CTV.Text = "CWM Water Content") 
+
+
+cowplot::plot_grid(p1,p2, p3, p4, labels = "auto")
+
+
+ggsave(filename = here("figures/fig_S10_other_BEF.png"),
+       width = 8, height= 7, units = "in", dpi = 600, bg = "white")
+```
+
+
+## Table S4 S5 Report selected curve fitting results in a table
+Note that string parsing removes the negative signs for the b, so make sure to annotate them back.
+```{r}
+res.tab <- results.global %>% 
+  mutate(CTV = factor(CTV, levels = c("logRespiration",
+                                      "logExcretionN",
+                                      "waterPWW","ratioCN"))) %>% 
+  # filter(r2 >= 0.1) %>% 
+  arrange(CTV, Diversity) %>% 
+  # Isolate the values of a and b for the model
+# note that for the linear model a = intercept, b = slope
+  mutate(a = as.numeric(unlist(regmatches(coefficients, gregexpr("\\d+\\.\\d+", coefficients))))[1]) %>% 
+  mutate(b = as.numeric(unlist(regmatches(coefficients, gregexpr("\\d+\\.\\d+", coefficients))))[2]) %>% 
+  select(CTV, Diversity, best_model, a, b,
+         aic, stderr, r2, coefficients)
+
+# write.csv(res.tab, 
+#           file = here("tables/curve_fit_global_results.csv"),
+#           row.names = FALSE)
+
+
+# Only report the pairs in the figures
+res.tab.reg <- results.bioregion %>% 
+  mutate(CTV = factor(CTV, levels = c("logRespiration",
+                                      "logExcretionN",
+                                      "waterPWW","ratioCN"))) %>% 
+  # Select which bioregions to present
+  filter((Diversity == "FRic" & CTV == "logRespiration") |
+           (Diversity == "FDis" & CTV == "logRespiration") |
+           (Diversity == "FDis" & CTV == "waterPWW") |
+           (Diversity == "FDiv" & CTV == "ratioCN")) %>% 
+  
+  
+  arrange(CTV, Diversity) %>% 
+  group_by(Bioregion,CTV, Diversity) %>% 
+  # Isolate the values of a and b for the model
+# note that for the linear model a = intercept, b = slope
+  mutate(a = as.numeric(unlist(regmatches(coefficients, gregexpr("\\d+\\.\\d+", coefficients))))[1]) %>% 
+  mutate(b = as.numeric(unlist(regmatches(coefficients, gregexpr("\\d+\\.\\d+", coefficients))))[2]) %>% 
+  select(CTV, Diversity, Bioregion, best_model, a, b,
+         aic, stderr, r2, coefficients) %>% 
+  ungroup()
+
+# write.csv(res.tab.reg, 
+#           file = here("tables/curve_fit_bioregion_results.csv"),
+#           row.names = FALSE)
+```

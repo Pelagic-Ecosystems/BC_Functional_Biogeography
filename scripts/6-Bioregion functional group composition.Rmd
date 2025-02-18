@@ -5,7 +5,7 @@ date: "2023-11-02"
 output: html_document
 ---
 
-This file calculates the functional group composition of the bioregions. The relative abundance and biomass of functional groups in trait space is also visualized. Bioregions are compared according to the absolute and relative abundance and biomass of functional groups overall, by season, and interannually.
+This file calculates the functional group composition of the bioregions. The relative abundance and biomass of functional groups in trait space are also visualized. The composition by functional groups are calculated in chunks 2 and 3 using the species level community data but there results of the calculations are stored in the bioregeions_fg_*.RData file. Bioregions are compared according to the absolute and relative abundance and biomass of functional groups.
 
 
 ```{r setup, include=FALSE}
@@ -27,24 +27,25 @@ set_here(path = "..")
 
 theme_set(theme_bw())
 
-# The original community data
-load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
-regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+# The community data
+# load(here("data/restricted_data/zoop_data_regionalized_annotated_20231018.RData"))
 
 # Functional group data + traits
 load(here("data/functional_grouping_results_20240617.RData"))
 
-geomean <- function(x) {  exp(mean(log(x), na.rm = TRUE))  }
-```
+# The calculated functional group composition per bioregion
+load(here("data/bioregions_fg_abundance_biomass_20250217.RData"))
 
+geomean <- function(x) {  exp(mean(log(x), na.rm = TRUE))  }
+
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+```
 
 
 # 2. Bioregion relative composition
 Calculate the total abundance and biomass of each functional group between bioregions
-```{r, fig.width=5}
-strip_fg <- ggh4x::strip_themed(background_x = ggh4x::elem_list_rect(
-  fill = gplots::col2hex(fungrp.colors)))
-
+```{r, eval=FALSE}
 # Filter the community data to only include the 163 species with trait information
 zoop.bc.species.fun <- zoop.bc %>% 
   # Add fuctional group information
@@ -74,23 +75,18 @@ zoop.bc.fun <- zoop.bc.species.fun %>%
   mutate(Percent.Biomass = Biomass.mg.m2/Total.Biomass*100,
          Percent.Abundance = Abundance.m2/Total.Abundance*100) %>% 
   select(-c(Total.Biomass, Total.Abundance)) 
-  
-# save(zoop.bc.species.fun, zoop.bc.fun,
-#      file = here("data/key_fg_abundance_biomass_20240626.RData"))
 ```
-
 
 
 # 3. Trait space "heatmaps"
 Color by functional group, size according to abundance or  biomass
 
-
 ## Prepare the dataframes
-```{r}
+This calculates the average abundance and biomass from the community data. Outputs are already exported to a data file loaded in the next chunk.
+```{r, eval=FALSE}
 # Extract the pcoa table from pcoa.vec
 species.pcoa <- pcoa.vec[,c(1:6)] %>% 
   column_to_rownames("Species")
-
 
 # Calculate average species abundance and biomass for each bioregion
 bioregion.biom <- zoop.bc.species.fun %>% 
@@ -141,11 +137,18 @@ sp.regions <- pcoa.vec %>%
   mutate(fungrp = factor(fungrp, levels = c("FG1","FG2","FG3","FG4","FG5",
                                             "FG6","FG7","FG8","FG9","FG10"))) %>% 
   arrange(-Biomass)
+
+
+save(zoop.bc.fun, sp.regions,
+     file = here("data/bioregions_fg_abundance_biomass_20250217.RData"))
 ```
 
 
-## PCoA 1 & 2: Abundance + Biomass
-```{r}
+## FigS4 Species density in trait space
+```{r, fig.height=6, fig.width=5}
+species.pcoa <- pcoa.vec[,c(1:6)] %>% 
+  column_to_rownames("Species")
+
 axestoplot <- c(1,2)
 # Create the global and regional hulls
 clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
@@ -153,7 +156,6 @@ clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
 dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
                  level=clustPoints[,3], key="level")
 hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-
 
 hplot.abund <- ggplot(data = sp.regions %>% 
          filter(Presence >= 0), aes(x = PC1, y = PC2)) +
@@ -166,28 +168,28 @@ hplot.abund <- ggplot(data = sp.regions %>%
                aes(color = fungrp, size = Abundance),
                alpha = 0.5) +
     scale_color_manual(values = fungrp.colors,
-                       name = "Functional Groups") +
-    
+                       name = "Functional\nGroups") +
     scale_size_area(max_size = 20, breaks=c(10,100,1000,10000,20000),
                     name = "Abundance\n(indiv m-2)") +
   
     theme(aspect.ratio = 1, legend.position="right", 
-          legend.box = "veritcal",
+          legend.box = "vertical",
           panel.background = element_rect(fill = "grey80"),
+          legend.key = element_rect(fill = "white"),
           strip.text = element_text(size = 10)) +
-  guides(color = guide_legend(title.position = "top", 
-                              title.hjust = 0.5, ncol = 2,
+  guides(#color = "none",
+    color = guide_legend(title.position = "top",
+                              title.hjust = 0.5, nrow = 10,
                               override.aes = list(size = 3),
                               order = 2),
          size = guide_legend(title.position = "top", 
                               title.hjust = 0.5,
+                            label.position = "bottom",
                              order = 1)) +
   xlab("PCoA 1") + ylab("PCoA 2") +
-  facet_wrap(~Bioregion, ncol = 2)
+  facet_wrap(~Bioregion, ncol = 1)
 
-hplot.abund
-ggsave(filename = here("figures/fig_4_traits_space_abundance_PC12.png"),
-    width = 7, height= 6, units = "in", dpi = 600, bg = "white")
+
 
 hplot.biom <- ggplot(data = sp.regions %>% 
          filter(Presence >= 0), aes(x = PC1, y = PC2)) +
@@ -200,32 +202,36 @@ hplot.biom <- ggplot(data = sp.regions %>%
                aes(color = fungrp, size = Biomass),
                alpha = 0.5) +
     scale_color_manual(values = fungrp.colors,
-                       name = "Functional Groups") +
-    
+                       name = "Functional\nGroups") +
     scale_size_area(max_size = 23, breaks=c(10,100,1000,2000,5000),
                     name = "Biomass\n(mg m-2)") +
   
     theme(aspect.ratio = 1, legend.position="right", 
-          legend.box = "veritcal",
+          legend.box = "vertical",
+          legend.key = element_rect(fill = "white"),
           panel.background = element_rect(fill = "grey80"),
           strip.text = element_text(size = 10)) +
-  guides(color = guide_legend(title.position = "top", 
-                              title.hjust = 0.5, ncol = 2,
+  guides(#color = "none",
+    color = guide_legend(title.position = "top",
+                         title.hjust = 0.5, nrow = 10,
                               override.aes = list(size = 3),
                               order = 2),
          size = guide_legend(title.position = "top", 
-                              title.hjust = 0.5,
+                            title.hjust = 0.5,
+                            label.position = "bottom",
                              order = 1)) +
   xlab("PCoA 1") + ylab("PCoA 2") +
-  facet_wrap(~Bioregion, ncol = 2)
+  facet_wrap(~Bioregion, ncol = 1)
 
-hplot.biom
-ggsave(filename = here("figures/fig_5_traits_space_biomass_PC12.png"),
-    width = 7, height= 6, units = "in", dpi = 600, bg = "white")
 
+cowplot::plot_grid(hplot.abund, hplot.biom, labels = "auto")
+
+ggsave(filename = here("figures/fig_S4_traits_space_ab_PC12.png"),
+    width = 10, height= 12, units = "in", dpi = 600, bg = "white")
 ```
 
-# 4.Table of bioregion comparisons
+
+# 4. Table S3 Bioregion composition comparisons
 ```{r}
 zoop.bc.fun.zeros <- zoop.bc.fun %>% 
   # Create a blank table of Key and functional groups
@@ -299,13 +305,17 @@ zoop.bc.sum.table <- bind_rows(zoop.bc.total,zoop.bc.sum.table) %>%
 
 # # Export table for annotation in excel.
 # write.csv(zoop.bc.sum.table,
-#           file = here("tables/bioregion_fg_means_to_annotate_20240704.csv"), row.names = FALSE)
+#           file = here("tables/table_S3_bioregion_fg_means_to_annotate_20240704.csv"), row.names = FALSE)
 
 ```
 
 
-## Relative abundance and biomass
+# 5. Plot relative abundance and biomass
+## As violin and bar plots
 ```{r}
+strip_fg <- ggh4x::strip_themed(background_x = ggh4x::elem_list_rect(
+  fill = gplots::col2hex(fungrp.colors)))
+
 # As violin plots
 g1 <- ggplot(zoop.bc.fun.zeros, aes(x = Bioregion, y = Percent.Abundance, 
                               fill = Bioregion)) +
@@ -353,11 +363,6 @@ plot_grid(plot_grid(g1, g2, labels = "auto", ncol = 1),
           legend_b, nrow = 2, rel_heights = c(1,0.05))
 
 
-# ggsave(filename = here("figures/fig_violin_percent_contribution_region.png"),
-# width = 10, height= 5, units = "in", dpi = 600, bg = "white")
-
-
-
 # As stacked bar plots
 zbs.sum <- zoop.bc.sum %>% 
   filter(Metric %in% c("Percent.Abundance",
@@ -376,17 +381,12 @@ ggplot(zbs.sum, aes(y = ValMean, x = Bioregion,
                   labels = c("0.00" = "0%","0.25" = "25%",
                              "0.50" = "50%", "0.75" = "75%", "1.00" = "100%")) +
   facet_wrap(~Metric) 
-
-
-# ggsave(filename = here("figures/fig_bar_percent_contribution_region.png"),
-# width = 7, height= 4, units = "in", dpi = 600, bg = "white")
-
 ```
 
-## Plot as treemap for summary figure 9
+## For Fig7 Plot as treemap
 ```{r}
 # install.packages("treemapify")
-# library(treemapify)
+library(treemapify)
 
 ggplot(zoop.bc.sum %>% 
          filter(Metric == "Percent.Biomass") %>% 
@@ -398,7 +398,7 @@ ggplot(zoop.bc.sum %>%
   scale_fill_manual(values = fungrp.colors) +
   theme(legend.position = "none")
 
-ggsave(filename = here("figures/fig9/treemap_biomass_offshore.png"),
+ggsave(filename = here("figures/treemap_biomass_offshore.png"),
 width = 4, height= 4, units = "in", dpi = 600, bg = "white")
 
 
@@ -413,7 +413,7 @@ ggplot(zoop.bc.sum %>%
   theme(legend.position = "none")
 
 
-ggsave(filename = here("figures/fig9/treemap_biomass_deepshelf.png"),
+ggsave(filename = here("figures/treemap_biomass_deepshelf.png"),
 width = 4, height= 4, units = "in", dpi = 600, bg = "white")
 
 
@@ -427,7 +427,7 @@ ggplot(zoop.bc.sum %>%
   scale_fill_manual(values = fungrp.colors) +
   theme(legend.position = "none")
 
-ggsave(filename = here("figures/fig9/treemap_biomass_nearshore.png"),
+ggsave(filename = here("figures/treemap_biomass_nearshore.png"),
 width = 4, height= 4, units = "in", dpi = 600, bg = "white")
 
 ggplot(zoop.bc.sum %>% 
@@ -440,67 +440,12 @@ ggplot(zoop.bc.sum %>%
   scale_fill_manual(values = fungrp.colors) +
   theme(legend.position = "none")
 
-ggsave(filename = here("figures/fig9/treemap_biomass_deepfjord.png"),
-width = 4, height= 4, units = "in", dpi = 600, bg = "white")
-
-ggplot(zoop.bc.sum %>% 
-         filter(Metric == "Percent.Abundance") %>% 
-         filter(Bioregion == "DeepFjord"), 
-       aes(area = ValMean, fill = as.factor(fungrp))) +
-  treemapify::geom_treemap(color = "white") +
-  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
-                                colour = "white") +
-  scale_fill_manual(values = fungrp.colors) +
-  theme(legend.position = "none")
-
-ggsave(filename = here("figures/fig9/treemap_abundance_deepfjord.png"),
-width = 4, height= 4, units = "in", dpi = 600, bg = "white")
-
-
-ggplot(zoop.bc.sum %>% 
-         filter(Metric == "Percent.Abundance") %>% 
-         filter(Bioregion == "Nearshore"), 
-       aes(area = ValMean, fill = as.factor(fungrp))) +
-  treemapify::geom_treemap(color = "white") +
-  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
-                                colour = "white") +
-  scale_fill_manual(values = fungrp.colors) +
-  theme(legend.position = "none")
-
-ggsave(filename = here("figures/fig9/treemap_abundance_nearshore.png"),
-width = 4, height= 4, units = "in", dpi = 600, bg = "white")
-
-ggplot(zoop.bc.sum %>% 
-         filter(Metric == "Percent.Abundance") %>% 
-         filter(Bioregion == "DeepShelf"), 
-       aes(area = ValMean, fill = as.factor(fungrp))) +
-  treemapify::geom_treemap(color = "white") +
-  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
-                                colour = "white") +
-  scale_fill_manual(values = fungrp.colors) +
-  theme(legend.position = "none")
-
-ggsave(filename = here("figures/fig9/treemap_abundance_deepshelf.png"),
-width = 4, height= 4, units = "in", dpi = 600, bg = "white")
-
-
-ggplot(zoop.bc.sum %>% 
-         filter(Metric == "Percent.Abundance") %>% 
-         filter(Bioregion == "Offshore"), 
-       aes(area = ValMean, fill = as.factor(fungrp))) +
-  treemapify::geom_treemap(color = "white") +
-  treemapify::geom_treemap_text(aes(label = paste0("FG",fungrp)), 
-                                colour = "white") +
-  theme(legend.position = "none") +
-  scale_fill_manual(values = fungrp.colors) +
-  theme(legend.position = "none")
-
-ggsave(filename = here("figures/fig9/treemap_abundance_offshore.png"),
+ggsave(filename = here("figures/treemap_biomass_deepfjord.png"),
 width = 4, height= 4, units = "in", dpi = 600, bg = "white")
 ```
 
 
-# 5. Significance tests
+# 7. Composition significance tests
 ## Sig diff test Overall
 ```{r}
 # Overall total
@@ -520,7 +465,6 @@ dunn.test::dunn.test(x=zoop.bc.total$Total.Biomass,
                      g =zoop.bc.total$Bioregion, 
                      method = "bh", alpha = 0.001)
 ```
-
 
 ## Sig diff test Total
 ```{r, eval=FALSE}
@@ -628,13 +572,6 @@ fun.abun.perc.dun <- fun.abun.perc %>%
 save(fun.biom.perc.kw, fun.abun.perc.kw,
      fun.biom.perc.dun, fun.abun.perc.dun,
      file = here("data/abundance_biomass_percent_kw_dunn_results_m2_N3721_20240704.RData"))
-
-# Most common similarities between functional groups
-dunn.sum <- bind_rows(fun.abun.dun, fun.biom.dun,
-                      fun.abun.perc.dun, fun.biom.perc.dun) %>% 
-  group_by(comparisons) %>% 
-  summarise(n = n(), .groups = "drop") %>% 
-  arrange(-n)
 ```
 
 

@@ -1,0 +1,694 @@
+---
+title: "Additional analysis"
+author: "Patrick Pata"
+date: "2024-10-16"
+output: html_document
+---
+
+This file contains the analysis of the functional assemblages which are identified based on community level trait characteristics rather than species distributions. The methodology of deriving the functional assemblages mirrors the methodology of deriving the taxonomic bioregions in Pata et al. (2022). Most of the figures and tables here could be reproduced by data outputs from other files except for Fig S8 which requires the restricted raw species-stage resolution community data.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(cowplot)
+library(here)
+library(ggtext)
+library(vegan)
+library(ggrepel)
+theme_set(theme_bw())
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+
+load(here("data/fundiv_3721_163species_20240618.RData"))
+load(here("data/community_metrics_3721_163species_20250217.RData")) 
+load(here("data/bc_bioregionalization_pca_20250217.RData"))
+load(here("data/BC_bioregionalization_metadata.RData"))
+
+geomean <- function(x) {  exp(mean(log(x), na.rm = TRUE))  }
+`%notin%` <- Negate(`%in%`)
+source(here("Functions/p_biplot_pca.R"))
+source(here("Functions/p_biplot_pca_points.R"))
+source(here("functions/p_goodness_of_clustering_v2.R"))
+
+
+fungrp.colors <- c("turquoise3", "steelblue2","darkorange2",
+                   "orchid","magenta4","lightcoral",
+                   "gold3","darkgreen","darkolivegreen4",
+                   "olivedrab3")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+```
+
+
+# 2. Organize the functional characteristics, log transform some values
+```{r}
+# Select total respiration rate and clearance rate because these are least similar, although r = 0.85
+ctotal <- zoop.163.ctotal %>% 
+  filter(Trait %in% c("totalRespirationRate","totalClearanceRate")) %>% 
+  # Log transform the values then widen
+  mutate(CTotal = log(CTotal)) %>% 
+  pivot_wider(names_from = "Trait", values_from = "CTotal") %>% 
+  select(Key, Bioregion, totalRespirationRate, totalClearanceRate)
+
+# The CWMs in long format are in zoop.163.cwm, convert to wider format for the figure
+# Reorder according to pca.zoop order
+cwm.wide <- data.frame(Key = rownames(fundiv.ind.biom)) %>% 
+  left_join(zoop.163.cwm, by = "Key", multiple = "all") %>% 
+  pivot_wider(names_from = Trait, values_from = CWM) %>% 
+  column_to_rownames("Key") %>% 
+  # Log transform specific traits (this will not affect correlations but will affect the PCA of the cWMs)
+  mutate(bodyLength = log(bodyLength),
+         dryWeight = log(dryWeight),
+         carbonWeight = log(carbonWeight),
+         nitrogenWeight = log(nitrogenWeight),
+         phosphorusWeight = log(phosphorusWeight),
+         respirationRate = log(respirationRate),
+         clearanceRate = log(clearanceRate),
+         excretionRateN = log(excretionRateN),
+         excretionRateP = log(excretionRateP),
+         respirationRate_WSC = log(respirationRate_WSC),
+         clearanceRate_WSC = log(clearanceRate_WSC),
+         excretionRateN_WSDW = log(excretionRateN_WSDW),
+         excretionRateP_WSDW = log(excretionRateP_WSDW))
+
+for.pca <- cwm.wide %>% 
+  rownames_to_column("Key") %>% 
+  left_join(ctotal, 
+            by = join_by(Key, Bioregion)) %>% 
+  left_join(fundiv.ind.biom %>% 
+              rownames_to_column("Key"),
+            by = join_by(Key, Bioregion)) %>% 
+  column_to_rownames("Key") %>% 
+  dplyr::select(-Bioregion) %>% 
+  
+  # Rename columns
+  rename("Active ambush" = "active ambush", "Cruise" = "cruise",
+         "Passive ambush" = "passive ambush", "Current" = "current",
+         "Broadcasting" = "broadcasting", "Brooding" = "brooding",
+         "Carnivore" = "carnivore", "Detritivore" = "detritivore",
+         "Herbivore" = "herbivore", "Omnivore" = "omnivore",
+         "Body length" = "bodyLength", 
+         "%C" = "carbonPDW",
+         "C weight" = "carbonWeight", 
+         "Ind. clearance" = "clearanceRate",
+         "Ws. clearance" = "clearanceRate_WSC", 
+         "Dry weight" = "dryWeight",
+         "Ind. N excretion" = "excretionRateN",
+         "Ws. N excretion" = "excretionRateN_WSDW",
+         "Ind. P excretion" = "excretionRateP",
+         "Ws. P excretion" = "excretionRateP_WSDW",
+         "%water" = "waterPWW",
+         "%N" = "nitrogenPDW", 
+         "N weight" = "nitrogenWeight",
+         "%P" = "phosphorusPDW", 
+         "P weight" = "phosphorusWeight",
+         "C:N" = "ratioCN", "C:P" = "ratioCP", "N:P" = "ratioNP",
+         "Ind. respiration" = "respirationRate",
+         "Ws. respiration" = "respirationRate_WSC",
+         "Total respiration" = "totalRespirationRate",
+         "Total clearance" = "totalClearanceRate",
+         "Species richness" = "Sp.Ric", "Functional richness" = "FRic",
+         "Functional dispersion" = "FDis", "Functional evenness" = "FEve",
+         "Functional divergence" = "FDiv", "Functional originality" = "FOri")
+  
+```
+
+
+# 3. PCAs
+## PCA of original bioregionalization biplot with functional characteristics
+```{r}
+# # Uncomment this to load the original bioregionalization site x species matrix for the PCA used in Pata et al. (2022). The PCA object is already loaded above.
+# load(here("data/restricted_data/zoop_data_regionalized_10252021.RData"))
+# rm(list=setdiff(ls(), ""))
+# pca.zoop <- rda(zoop.logchord)
+# save(pca.zoop, file = here("data/bc_bioregionalization_pca_20250217.RData"))
+
+
+# Plot the PCA of the species distribution used in the taxonomic bioregions
+# Correlate the axes 
+axismat <- vegan::scores(pca.zoop, choices = c(1:4), display = "sites")
+points.stand <- scale(axismat)
+xmat = scale(for.pca , center=TRUE, scale=TRUE)
+
+U <- cor(xmat, points.stand, use="pairwise.complete.obs")
+# Only retain correlations > 0.25 for axes 1 & 2
+U12 <- as.data.frame(U) %>%
+  filter( abs(PC1) > 0.25 | abs(PC2) > 0.25 )
+
+# Only retain correlations > 0.25 for axes 3 & 4
+U34 <- as.data.frame(U) %>%
+  filter( abs(PC3) > 0.25 | abs(PC4) > 0.25 )
+
+# Filter the relatively strong correlations
+for.pca12 <- as.data.frame(for.pca) %>% 
+  dplyr::select(rownames(U12))
+for.pca34 <- as.data.frame(for.pca) %>%  
+   dplyr::select(rownames(U34))
+
+p1a <- p_biplot_pca_points(rdaoutput = pca.zoop, 
+             xmat = for.pca12,
+             cluster = cwm.wide$Bioregion,
+             axestoplot = c(1,2),
+             alpha = 0.1, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, 
+             rescaleSites = 2, scaleCorrelations = FALSE) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+
+
+p1b <- p_biplot_pca_points(rdaoutput = pca.zoop, 
+             xmat = for.pca34,
+             cluster = cwm.wide$Bioregion,
+             axestoplot = c(3,4),
+             alpha = 0.1, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, 
+             rescaleSites = 2, scaleCorrelations = FALSE) +
+  theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+```
+
+
+## Check correlation between community level traits
+```{r,eval=FALSE}
+# Find strongest correlations
+# cor.mat <- cor(cwm.wide[,2:31], use = "complete.obs")
+cor.mat <- cor(for.pca, use = "complete.obs")
+diag(cor.mat) <-  NA
+cor.mat.long <- cor.mat %>% 
+  as.data.frame() %>% 
+  rownames_to_column("IndexY") %>% 
+  pivot_longer(cols = -IndexY, names_to = "IndexX", values_to = "Value") %>% 
+  filter(!is.na(Value)) %>% 
+  mutate(IndexX = factor(IndexX, levels = colnames(cor.mat)),
+         IndexY = factor(IndexY, levels = colnames(cor.mat)),)
+cor.strong <- cor.mat.long %>% 
+  filter(abs(Value) > 0.66) %>% 
+  arrange(-abs(Value))
+cor.strong <- cor.strong[seq(1,nrow(cor.strong),2),]
+```
+
+
+## PCA of community level trait values
+```{r}
+# Exclude traits that are strongly correlated 
+for.pca.sub <- for.pca %>% 
+  dplyr::select(-c("Ind. respiration", "N weight", "P weight",
+            "Dry weight","Ind. P excretion", 
+            "Ind. N excretion", "Ind. clearance",
+            "%C","%P", "%N", "Broadcasting",
+            "Ws. P excretion",
+            "C:P","Omnivore","Carnivore","Species richness",
+            "Total clearance","Body length"))
+  
+for.pca.sub <- scale(for.pca.sub)
+
+pca.ctv <- rda(for.pca.sub)
+
+
+# visualize all community level traits instead of the selected 20?
+# Correlate the axes
+axismat <- vegan::scores(pca.ctv, choices = c(1:4), display = "sites")
+points.stand <- scale(axismat)
+xmat = scale(for.pca , center=TRUE, scale=TRUE)
+
+U <- cor(xmat, points.stand, use="pairwise.complete.obs")
+# Only retain correlations > 0.25 for axes 1 & 2
+U12 <- as.data.frame(U) %>%
+  filter( abs(PC1) > 0.25 | abs(PC2) > 0.25 )
+
+# Only retain correlations > 0.25 for axes 3 & 4
+U34 <- as.data.frame(U) %>%
+  filter( abs(PC3) > 0.25 | abs(PC4) > 0.25 )
+
+# Filter the relatively strong correlations
+for.pca12 <- as.data.frame(for.pca) %>%
+  dplyr::select(rownames(U12))
+for.pca34 <- as.data.frame(for.pca) %>%
+   dplyr::select(rownames(U34))
+
+
+# Variance explained
+head(round( pca.ctv$CA$eig/pca.ctv$tot.chi*100, digits = 1),10)
+sum(head(round( pca.ctv$CA$eig/pca.ctv$tot.chi*100, digits = 1),6))
+
+
+p2a <- p_biplot_pca_points(rdaoutput = pca.ctv, 
+             xmat = for.pca12, #for.pca.sub,
+             cluster = cwm.wide$Bioregion,
+             axestoplot = c(1,2),
+             alpha = 0.1, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, 
+             rescaleSites = 0.7, scaleCorrelations = FALSE) +
+  scale_y_reverse() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+
+p2b <- p_biplot_pca_points(rdaoutput = pca.ctv, 
+             xmat = for.pca34, #for.pca.sub,
+             cluster = cwm.wide$Bioregion,
+             axestoplot = c(3,4),
+             alpha = 0.1, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, 
+             rescaleSites = 0.7, scaleCorrelations = FALSE)+
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+```
+
+# 4. Cluster analysis
+Cluster the CTVs to get clusters with similarities in functional characteristics
+With 5 axes representing 68% of the variance in the data, 6 clusters were optimal using the K-means analysis.
+
+Reassign clusters
+2 -> FA1 (current feeding, high biomass, copepod/appendicularian)
+3 -> FA2 (Deepshelf + ~OS, euphausiid dominated)
+4 -> FA3 (Nearshore + ~DS, coastal gelatinous dominated)
+1 -> FA4 (deepfjord + offshore... deep and diverse with FG4/detri & gelat)
+5 -> FA5 (Offshore + deepshelf, "balanced", high func disp, more chaetognaths)
+6 -> FA6 (outliers)
+```{r}
+# The first 5 axes contain 68% of the variance (> 2/3)
+sum(head(round(pca.ctv$CA$eig/pca.ctv$tot.chi*100, digits = 1),5))
+pca.ctv.scores <- vegan::scores(pca.ctv, choices = c(1:5))$sites
+
+# Hierarchical
+pca.hc <- hclust(dist(pca.ctv.scores), method = "ward.D2")
+plot(pca.hc, labels = FALSE)
+
+set.seed(888)
+nclust <- 15
+hclust.funreg<- matrix(NA, nrow = nrow(pca.ctv.scores), ncol = (nclust-1))
+kmeans.funreg<- matrix(NA, nrow = nrow(pca.ctv.scores), ncol = (nclust-1))
+for (k in seq(2,nclust)) {
+  hclust.funreg[,k-1] <- as.factor(cutree(pca.hc, k = k))
+  kmeans.funreg[,k-1] <- kmeans(pca.ctv.scores, k, nstart = 10, 
+                                iter.max = 1000)$cluster
+}
+# gci.h <- goc_index(multiclust = hclust.funreg,
+#                 distmat = dist(pca.ctv.scores)) %>% 
+#   pivot_longer(-Num_Clusters, names_to = "Index", 
+#                values_to = "Index Value") %>% 
+#   mutate(method = "ward")
+# gci.k <- goc_index(multiclust = kmeans.funreg,
+#                 distmat = dist(pca.ctv.scores)) %>% 
+#   pivot_longer(-Num_Clusters, names_to = "Index", 
+#                values_to = "Index Value") %>% 
+#   mutate(method = "kmeans")
+# 
+# gci.both <- bind_rows(gci.h, gci.k)
+# 
+# ggplot(gci.both, aes(x = Num_Clusters, y = `Index Value`, color = method)) + 
+#   geom_point() + geom_line() +
+#   scale_x_continuous(breaks = seq(2,20,1)) +
+#   xlab("Number of Clusters") +
+#   facet_wrap(~ Index, nrow = 2, scales = "free")
+#
+#
+# ggsave(file = here("figures/gci_ctv.png"),
+#        height = 6, width = 8, dpi = 300, bg = "white")
+
+
+# Appears that 6 is best
+pca.meta <- as.data.frame(pca.ctv.scores) %>% 
+  rownames_to_column("Key") %>% 
+  dplyr::select(Key) %>% 
+  mutate(FunRegion = as.character(kmeans.funreg[,5])) %>% 
+  # rename and rearrange cluster ids
+  mutate(FunRegion = if_else(FunRegion == "1", "FA4", FunRegion),
+         FunRegion = if_else(FunRegion == "2", "FA1", FunRegion),
+         FunRegion = if_else(FunRegion == "3", "FA2", FunRegion),
+         FunRegion = if_else(FunRegion == "4", "FA3", FunRegion),
+         FunRegion = if_else(FunRegion == "5", "FA5", FunRegion),
+         FunRegion = if_else(FunRegion == "6", "FA6", FunRegion)) %>% 
+  mutate(FunRegion = factor(FunRegion,
+                            levels = c("FA1","FA2","FA3","FA4","FA5","FA6")))
+
+
+clrs.funbioregion2 <- c("gold","slateblue2","firebrick1","turquoise3","sienna2","gray65")
+
+
+p3a <- p_biplot_pca(rdaoutput = pca.ctv, 
+             # xmat = for.pca,
+             cluster = pca.meta$FunRegion,
+             axestoplot = c(1,2),
+             alpha = 0.4, legendtitle = "Functional\nAssemblages",
+             clrs = clrs.funbioregion2, plottitle = "") +
+  scale_y_reverse() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+
+p3b <- p_biplot_pca(rdaoutput = pca.ctv, 
+             # xmat = for.pca,
+             cluster = pca.meta$FunRegion,
+             axestoplot = c(3,4),
+             alpha = 0.4, legendtitle = "Functional\nAssemblages",
+             clrs = clrs.funbioregion2, plottitle = "")  +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+
+# # Output these clusters for further analysis
+# save(pca.meta, clrs.funbioregion2, gci.both, kmeans.funreg,
+#      file = here("data/clustering_fun_assemblages.RData"))
+
+```
+
+
+
+# 5. Correlate the species biomass to the CWM-PCA axes
+Color by functional group. This requires the species distribution data.
+```{r}
+# Community data
+load(here("data/restricted_data/key_fg_abundance_biomass_20240626.RData"))
+
+# Organize the site x biomass matrix
+com.mat <- zoop.bc.species.fun %>% 
+  # If based on biomass
+  dplyr::select(c(Key, Species, Biomass.mg.m2)) %>% 
+  pivot_wider(names_from = "Species", values_from = "Biomass.mg.m2",
+              values_fill = 0) %>%
+  column_to_rownames("Key")
+  
+# Transform the matrix
+com.mat.2 <- log1p(com.mat)
+
+# PCA axis scores
+pca.ctv.scores <- vegan::scores(pca.ctv, choices = c(1:5))$sites
+
+# Correlate species abundances to PCA axis scores
+U <- cor(com.mat.2, pca.ctv.scores) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Species") %>% 
+  # If by functional group
+  left_join(zoop.bc.species.fun %>% 
+              distinct(Species, fungrp), 
+            by = "Species") %>% 
+  mutate(fungrp = factor(fungrp, levels = c(1:10)))
+
+U1 <- filter(U, PC1 >0.20 | PC1 < -0.20 | PC2 < -0.25 | PC2 > 0.15)
+p4a <- ggplot(U, aes(x = PC1, y = PC2)) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  geom_point(shape = 16, size = 2, aes(color = fungrp)) +
+  geom_text_repel(data = U1,
+                  aes(label = Species, color = fungrp), size = 4,
+                  max.overlaps = 15, fontface = "italic",
+                  show.legend = FALSE) +
+  scale_y_reverse() +
+  scale_color_manual(values = rev(fungrp.colors[sort(as.numeric(unique(U$fungrp)))]),
+                     name = "Functionals\nGroup",
+           labels = paste0("FG", unique(zoop.163.ctotal.ave$fungrp)),
+                     guide = guide_legend(override.aes = list(size = 4))) +
+  theme(aspect.ratio = 1, legend.position = "bottom",
+        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
+        legend.text = element_text(size = 12))
+
+U2 <- filter(U, PC3 > 0.45 | PC3 < -0.2 | PC4 > 0.20 | PC4 < -0.25)
+p4b <- ggplot(U, aes(x = PC3, y = PC4)) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  geom_point(shape = 16, size = 2, aes(color = fungrp)) +
+  geom_text_repel(data = U2,
+                  aes(label = Species, color = fungrp), size = 4,
+                  max.overlaps = 15, fontface = "italic",
+                  show.legend = FALSE) +
+  scale_color_manual(values = rev(fungrp.colors[sort(as.numeric(unique(U$fungrp)))]),
+                     name = "Functionals\nGroup",
+           labels = paste0("FG", unique(zoop.163.ctotal.ave$fungrp)),
+                     guide = guide_legend(override.aes = list(size = 4))) +
+  theme(aspect.ratio = 1, legend.position = "bottom",
+        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
+        legend.text = element_text(size = 12))  
+
+
+```
+
+
+
+# 6. Fig5 FigS7 Combine ordinations in one figure
+```{r, fig.height=6, fig.width=6}
+cowplot::plot_grid(p1a,p2a,p3a,p4a,
+                   nrow = 2,
+                   labels = "auto")
+ggsave(filename = here("figures/fig_5_FA_ordinations_12.png"),
+       width = 12, height= 13, units = "in", dpi = 600, bg = "white")
+
+# Supplementary figure for axes 3 & 4
+cowplot::plot_grid(p1b,p2b,p3b,p4b,
+                   nrow = 2,
+                   labels = "auto")
+ggsave(filename = here("figures/fig_S7_FA_ordinations_34.png"),
+       width = 12, height= 13, units = "in", dpi = 600, bg = "white")
+
+
+```
+
+
+
+# 7. FigS6 Correspondence FA and bioregions
+## Time series of the FC clusters by bioregion
+Biased by number of samples in a season-year
+```{r}
+# By year
+ts.fclust <- pca.meta %>% 
+  left_join(zoopmeta, by = "Key") %>% 
+  group_by(Bioregion, Year, FunRegion) %>% 
+  summarise(nsamples = n(), .groups = "drop")
+
+ggplot(ts.fclust, aes(x = Year, y = nsamples)) +
+  geom_bar(aes(fill = FunRegion), position = "fill", stat="identity") +
+  scale_fill_manual(values = clrs.funbioregion2,
+           name = "Functional\nAssemblage") +
+  scale_y_continuous(expand = c(0, 0),
+                     name = "Proportion of samples") +
+  theme(legend.position = "right",  
+        strip.text = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.title.y.right = element_markdown()) +
+  facet_wrap(~Bioregion, scales = "free_y")
+
+# ggsave(filename = here("figures/fun_assem_timeseries_year.png"),
+#        width = 9, height= 6, units = "in", dpi = 600, bg = "white")
+
+
+# By month
+ts.fclust <- pca.meta %>% 
+  left_join(zoopmeta, by = "Key") %>% 
+  group_by(Bioregion, Month, FunRegion) %>% 
+  summarise(nsamples = n(), .groups = "drop")
+
+pfa1 <- ggplot(ts.fclust, aes(x = as.factor(Month), y = nsamples)) +
+  geom_bar(aes(fill = FunRegion), position = "fill", stat="identity") +
+  scale_fill_manual(values = clrs.funbioregion2,
+           name = "Functional\nAssemblage") +
+  scale_y_continuous(expand = c(0, 0),
+                     name = "Proportion of samples") +
+  xlab("Month") +
+  theme(legend.position = "right",  
+        strip.text = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.title.y.right = element_markdown()) +
+  facet_wrap(~Bioregion, scales = "free_y")
+
+
+pfa1
+
+# ggsave(filename = here("figures/fun_assem_timeseries_month.png"),
+#        width = 9, height= 6, units = "in", dpi = 600, bg = "white")
+```
+
+## Table matching the original bioregionalization with the functional clusters
+```{r}
+confmat <- table(zoopmeta$Bioregion, pca.meta$FunRegion) %>% 
+  as.data.frame()
+colnames(confmat) = c("Bioregion","FunCluster","Nsamples")
+# Calculate the percent of samples from the bioregion belonging to the functional clusters
+confmat <- confmat %>% 
+  group_by(Bioregion) %>% 
+  mutate(totalsamp = sum(Nsamples)) %>% 
+  ungroup() %>% 
+  mutate(perc.bioregion = Nsamples/totalsamp*100) %>% 
+  
+  group_by(FunCluster) %>% 
+  mutate(totalFC = sum(Nsamples)) %>% 
+  ungroup() %>% 
+  mutate(perc.FC = Nsamples/totalFC*100)
+
+
+pfa2 <- ggplot(confmat, aes(x = FunCluster, y = Bioregion)) +
+  geom_tile(aes(fill = Bioregion, alpha = perc.bioregion), color = "white") + 
+  geom_text(aes(label = paste0(sprintf("%0.1f", perc.bioregion), "%\n (n = ",
+                               Nsamples,")")), 
+            color = "black") +
+  scale_fill_manual(values = clrs.bioregion) +
+  xlab("Functional Assemblage") +
+  theme(axis.title = element_text(size = 12),
+        axis.text.x = element_text(size = 12, 
+                                   face = "bold", colour = clrs.funbioregion2),
+        axis.text.y = element_text(size = 12, 
+                                   face = "bold", colour = clrs.bioregion),
+        legend.position = "none",
+        panel.background = element_rect(fill = "white"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) 
+pfa2
+
+
+# Combine the overall and seasonal matching between bioregions
+cowplot::plot_grid(pfa2, pfa1, labels = "auto",
+                   rel_heights = c(1, 1.8), ncol = 1)
+
+ggsave(filename = here("figures/fig_s6_fun_assem_bioregion.png"),
+       width = 9, height= 8, units = "in", dpi = 600, bg = "white")
+
+```
+
+
+
+# 8. Fig S8 Total rates figure but by functional clusters
+```{r}
+# Load the complete community data for community totals
+load(here("data/restricted_data/BC_3721_163_speciesstage_traits_20250217.RData"))
+
+
+zoop.163.ctotal.plot.2 <- zoop.spstg.ctotal %>%
+  left_join(pca.meta, by = "Key") %>% 
+  
+  mutate(Abundance.m2 = `Abundance(#/m3)` * Depth_Start) %>% 
+  mutate(Biomass.mg.m2 = `Biomass(mg/m3)` * Depth_Start) %>% 
+
+  # Calculate community totals
+  group_by(Key, FunRegion, fungrp) %>%
+  summarise(dryWeight = sum(dryWeight * Abundance.m2),
+            carbonWeight = sum(carbonWeight * Abundance.m2),
+            nitrogenWeight = sum(nitrogenWeight * Abundance.m2),
+            phosphorusWeight = sum(phosphorusWeight * Abundance.m2),
+            respirationRate = sum(respirationRate * Abundance.m2),
+            clearanceRate = sum(clearanceRate * Abundance.m2),
+            excretionRateN = sum(excretionRateN * Abundance.m2),
+            excretionRateP = sum(excretionRateP * Abundance.m2),
+            Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2),
+            .groups = "drop") %>% 
+  
+  # pad zeros to empty FGs (not really necessary... because the Key-Bioregion-FG pair with blanks will never show up (e.g., FG2))
+  pivot_longer(cols = c(dryWeight:Biomass),
+               names_to = "Metric", values_to = "Value") %>% 
+  pivot_wider(names_from = Metric, values_from = Value,
+              values_fill = 0) %>%
+  pivot_longer(cols = c(dryWeight:Biomass),
+               names_to = "Metric", values_to = "Value") %>% 
+  
+  # Average across all values (not staggered by year-month)
+  group_by(FunRegion, Metric, fungrp) %>% 
+  summarise(Value.mean = mean(Value),
+            Value.sd = sd(Value),
+            nsamples = n(), .groups = "drop") %>% 
+  mutate(Value.se = Value.sd / sqrt(nsamples)) %>% 
+  mutate(fungrp = factor(fungrp, levels = c("1","2","3","4","5","6",
+                                            "7","8","9","10"))) %>%  
+  
+  filter(Metric %notin% c("Biomass","nitrogenWeight", 
+                          "phosphorusWeight", "dryWeight")) %>% 
+  mutate(Metric = if_else(Metric == "carbonWeight",
+                          "Carbon Weight", Metric),
+         Metric = if_else(Metric == "clearanceRate",
+                          "Clearance Rate", Metric),
+         Metric = if_else(Metric == "respirationRate",
+                          "Respiration Rate", Metric),
+         Metric = if_else(Metric == "excretionRateN",
+                          "Ammonium Excretion Rate", Metric),
+         Metric = if_else(Metric == "excretionRateP",
+                          "Phosphate Excretion Rate", Metric)) %>% 
+  mutate(Metric = factor(Metric, levels = c("Abundance","Carbon Weight",
+                                            "Respiration Rate",
+                                            "Ammonium Excretion Rate",
+                                            "Phosphate Excretion Rate",
+                                            "Clearance Rate")))
+           
+
+# Cowplot version
+metrics <- levels(zoop.163.ctotal.plot.2$Metric)
+plots <- vector("list",2)
+count <- 1
+for (i in c(1:6)) {
+   plots[[count]] <- ggplot(zoop.163.ctotal.plot.2 %>% 
+                                  filter(Metric == metrics[i]), 
+                                aes(x = FunRegion, y = Value.mean)) +
+      geom_bar(aes(fill = fungrp), position = "stack", stat = "identity") +
+      scale_fill_manual(values = rev(fungrp.colors), 
+                        name = "Functional\nGroup") +
+      scale_y_continuous(expand = c(0, 0),
+                         name =unique(metrics[i])) +
+     xlab("Functional Assemblages") +
+      theme(legend.position = "none",
+            axis.title.y.right = element_markdown()) 
+  
+  count <- count + 1
+}
+
+# Combine the plots into a grid
+plot_grid_layout <- plot_grid(plotlist = plots, ncol = 3, labels = "auto") 
+plot_grid_layout
+
+
+ggsave(filename = here("figures/fig_S8_com_total_rates_by_funreg.png"),
+       width = 12, height= 6, units = "in", dpi = 600, bg = "white")
+```
+
+# 9. Fig S9 Functional diversity by FA
+```{r}
+fd.fa <- fundiv.ind.biom.long %>% 
+  left_join(pca.meta, by = "Key") 
+
+Metric.labs <- c("Species Richness","Functional Richness",
+                 "Functional Dispersion","Functional Evenness",
+                 "Functional Divergence","Functional Originality")
+names(Metric.labs) <- c("Sp.Ric","FRic","FDis","FEve","FDiv","FOri")
+
+
+fdivplots <- vector("list",2)
+count <- 1
+for (i in c(1:6)) {
+   fdivplots[[count]] <- ggplot(filter(fd.fa, 
+                                        Metric == names(Metric.labs)[i]),
+                      aes(x = FunRegion, y = Value, fill = FunRegion)) +
+  geom_violin(aes(color = FunRegion), alpha = 0.6) + 
+  geom_boxplot(width = 0.3, color = "grey25", outlier.shape = NA) +
+  xlab("") +
+  ylab(Metric.labs[i]) +
+  scale_y_continuous(expand = c(0.01, 0.01)) +
+  theme(legend.position = "none",  
+        axis.title = element_text(size = 12),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        # axis.ticks.x = element_blank(),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        strip.text.x = element_text(size = 12)) +
+  scale_fill_manual(values = clrs.funbioregion2) +
+  scale_color_manual(values = clrs.funbioregion2) 
+  
+  count <- count + 1
+}
+
+legend_b1 <- get_legend(
+   fdivplots[[1]] + 
+    # guides(color = guide_legend(nrow = 2)) +
+    theme(legend.position = "bottom")
+)
+
+
+plot.violin <- plot_grid(
+  plot_grid(plotlist = fdivplots, nrow = 2, labels = "auto"),
+  legend_b1, 
+  ncol = 1, rel_heights = c(1, .1))
+
+plot.violin
+
+ggsave(file = here("figures/fig_S9_fundiv_funassemblages_violin.png"),
+       height = 6, width = 10, dpi = 300, bg = "white")
+```

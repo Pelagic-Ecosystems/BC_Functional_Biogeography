@@ -5,6 +5,8 @@ date: '2023-01-06'
 output: html_document
 ---
 
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -13,9 +15,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(here)
-library(rnaturalearth)
-library(marmap)
-library(mapdata)
+# library(rnaturalearth) # For map
+# library(marmap)
+# library(mapdata)
 
 set_here(path = "..")
 `%notin%` <- Negate(`%in%`)
@@ -23,15 +25,28 @@ set_here(path = "..")
 theme_set(theme_bw())
 
 load(here("data/BC_species_trait_matrices_20240604.RData"))
-load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
-rm(zoop.bc.excluded, taxonomy, zoopdiversity, zoopenvi)
 
+load(here("data/BC_bioregionalization_metadata.RData"))
+
+load(here("data/BC_bioregionalization_species_average.RData"))
+
+# Recalculate the species average abundance and biomass
+# load(here("data/restricted_data/zoop_data_regionalized_annotated_20231018.RData"))
+# rm(zoop.bc.excluded, taxonomy, zoopdiversity, zoopenvi)
+# zoop.bc.sum <- zoop.bc %>% 
+#   group_by(Species) %>% 
+#   summarise(Biomass = sum(Biomass.mg.m2), Abundance = sum(Abundance.m2),
+#             nsamples = n(), .groups = "drop") %>%
+#   mutate(Perc.Biomass = Biomass/sum(Biomass)*100,
+#          Perc.Abundance = Abundance/sum(Abundance)*100)
+
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
 ```
 
 
 
-# 2. Map of samples
-```{r}
+# 2. Fig1 Map of samples
+```{r, eval=FALSE}
 world <- ne_countries(scale = "large", returnclass = "sf")
 
 # get bathymetry data
@@ -39,11 +54,10 @@ bathy = getNOAA.bathy(lon1 = -150, lon2 = -122, lat1 = 45, lat2 = 60, resolution
 # convert bathymetry to data frame
 bathy = fortify.bathy(bathy)
 
+
 map.samp <- ggplot(data = world) +
   geom_sf(fill = "#A9A9A9") + 
   coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
-  # geom_contour(data = bathy, aes(x=x, y=y, z=z), 
-  #              breaks=c(-100,-200,-500), linewidth=0.2, colour="black") +
   xlab("") + ylab("") + theme_bw() + 
   theme(legend.position = "bottom", 
         # legend.key.width = unit(0.8, "inch"),
@@ -77,20 +91,12 @@ map.samp <- ggplot(data = world) +
 map.samp
 
 ggsave(file = here("figures/fig_1_map_samples_to_annotate_legend.png"),
-height = 6, width = 9, dpi = 300, bg = "white")
+       height = 6, width = 9, dpi = 300, bg = "white")
 ```
 
-# 3. Plot data coverage
+# 3. FigS1 Plot data coverage
 value conf for both categorical and numeric traits
 ```{r}
-zoop.bc <- zoop.bc %>% 
-  group_by(Species) %>% 
-  summarise(Biomass = sum(Biomass.mg.m2), Abundance = sum(Abundance.m2),
-            nsamples = n(), .groups = "drop") %>%  # concenration is in /mg2
-  mutate(Perc.Biomass = Biomass/sum(Biomass)*100,
-         Perc.Abundance = Abundance/sum(Abundance)*100)
-  
-  
 valueConf.df <- lvl3.numeric %>% 
   select(Species, presence.perc, traitName, valueConf, majorgroup) %>% 
   bind_rows(distinct(lvl3.categorical, Species, presence.perc, 
@@ -102,7 +108,7 @@ valueConf.df <- lvl3.numeric %>%
   select(-majorgroup) %>% 
   
   arrange(valueConf) %>% 
-  left_join(zoop.bc, by = "Species") %>% 
+  left_join(zoop.bc.sum, by = "Species") %>% 
   mutate(valueConf = as.factor(valueConf), traitName = as.factor(traitName)) %>%
   mutate(traitName = factor(traitName, 
                             levels = 
@@ -132,14 +138,14 @@ g1 <- ggplot(valueConf.df, aes(y = traitName, x = N.species, fill = valueConf)) 
                    labels = rev(c("Body length", "Dry weight", 
                                   "Water content", "Carbon content", 
                                   "Nitrogen content", "Phosphorus content",
-                                  "C:N", "C:P", "N:P",
+                                  "C:N ratio", "C:P ratio", "N:P ratio",
                                   "Reproduction mode", "Feeding mode",
                                   "Trophic group",
                                   "Carbon weight", "Nitrogen weight",
                                   "Phosphorus weight", "Ind. respiration rate",
                                   "Ws. respiration rate", 
-                                  "Ind. ammonia excretion rate",
-                                  "Ws. ammonia excretion rate",
+                                  "Ind. ammonium excretion rate",
+                                  "Ws. ammonium excretion rate",
                                   "Ind. phosphate excretion rate",
                                   "Ws. phosphate excretion rate",
                                   "Ind. clearance rate",
@@ -161,85 +167,6 @@ cowplot::plot_grid(g1, g2, labels = c("auto"), rel_widths = c(1, 0.9))
 
 ggsave(filename = here("figures/fig_s1_proportion_trait_source.png"),
     width = 8, height= 4, units = "in", dpi = 300)
-
-valueConf.df %>% 
-  filter(valueConf %in% c(2,3)) %>% 
-  summarise(sum(N.species))
-
 ```
 
-# 4. Plot range of values relative to dry weight or length
-```{r, fig.width=5}
-# load(here("data/BC_species_trait_matrices_20231101.RData"))
-traitName.labels <- c("Body length","Dry weight","Wet weight",
-                      "Carbon weight","Nitrogen weight","Phosphorus weight",
-                      "Water content","Carbon content",
-                      "Nitrogen content","Phosphorus content",
-                      "C:N","C:P","N:P",
-                      "Individual\nrespiration rate",
-                      "Weight-specific\nrespiration rate",
-                      "Individual ammonia\nexcretion rate",
-                      "Weight-specific ammonia\nexcretion rate",
-                      "Individual phosphate\nexcretion rate",
-                      "Weight-specific phosphate\nexcretion rate",
-                      "Individual\nclearance rate",
-                      "Weight-specific\nclearance rate")
-names(traitName.labels) <- c("bodyLength","dryWeight","wetWeight",
-                      "carbonWeight","nitrogenWeight","phosphorusWeight",
-                      "waterPWW","carbonPDW","nitrogenPDW","phosphorusPDW",
-                      "ratioCN","ratioCP","ratioNP",
-                      "respirationRate","respirationRate_WSC",
-                      "excretionRateN","excretionRateN_WSDW",
-                      "excretionRateP","excretionRateP_WSDW",
-                      "clearanceRate","clearanceRate_WSC")
-
-# Assign colors to major groups
-majorgroup.colors <- data.frame(
-  majorgroup = c("Calanoid","Non-calanoid","Amphipod", "Mysid",
-                 "Euphausiid", "Ostracod","Polychaete","Pteropod",
-                 "Chaetognath","Appendicularian","Thaliacean",
-                 "Hydromedusae","Siphonophore","Ctenophore"),
-  color = c("blue4","dodgerblue","slateblue1", "seagreen3",
-                   "cyan3","forestgreen","lightpink2","green2",
-                   "darkorchid4","violetred","tomato1",
-                   "tan1","yellow2","red3"))               
-
-
-length.num <- lvl3.numeric %>% 
-  filter(presence.perc > 1) %>%
-  mutate(majorgroup = factor(majorgroup, levels = majorgroup.colors$majorgroup)) %>% 
-  filter(traitName != "bodyLength") %>% 
-  left_join(lvl3.numeric %>% 
-              filter(traitName == "bodyLength") %>% 
-              select(Species, body.length = traitValue), by = "Species") %>% 
-  mutate(traitName = 
-           factor(traitName, levels = 
-                    c("bodyLength","dryWeight","wetWeight",
-                      "carbonWeight","nitrogenWeight","phosphorusWeight",
-                      "waterPWW","carbonPDW","nitrogenPDW","phosphorusPDW",
-                      "ratioCN","ratioCP","ratioNP",
-                      "respirationRate","respirationRate_WSC",
-                      "excretionRateN","excretionRateN_WSDW",
-                      "excretionRateP","excretionRateP_WSDW",
-                      "clearanceRate","clearanceRate_WSC",
-                      "reproductionMode","feedingMode",
-                      "trophicGroup"))) %>% 
-  # log transform som traits
-  mutate(traitValue = if_else(!grepl("PDW|PWW|CN|CP|NP", traitName),
-                              log10(traitValue), traitValue)) 
-
-ggplot(length.num, aes(x = body.length, y = traitValue, color = majorgroup)) +
-  geom_point(alpha = 0.5) + 
-  scale_x_log10() +
-  scale_color_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  facet_wrap(~traitName, scales = "free", ncol = 4,
-             labeller = labeller(traitName = traitName.labels)) +
-  xlab("Body Length (mm)") +
-  ylab("Trait Value")
-
-
-ggsave(filename = here("figures/fig_s3_distribution_trait_values.png"),
-    width = 10, height= 8, units = "in", dpi = 600)
-
-```
 

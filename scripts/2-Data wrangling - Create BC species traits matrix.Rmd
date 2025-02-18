@@ -11,7 +11,7 @@ This file creates the species-traits matrix for analysis in this manuscript. The
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Load libraries and functions
+# 1. Load libraries and functions
 ```{r}
 library(tidyverse)
 library(openxlsx)
@@ -25,7 +25,7 @@ source(here("functions/toolkit_database.R"))
 theme_set(theme_bw())
 ```
 
-# Data preparation
+# 2. Data preparation
 ```{r}
 # Database format
 s.format <- read.csv(here("data/trait_database_raw/trait_dataset_standard_format_20230628.csv"))[-1,]
@@ -35,7 +35,7 @@ trait.directory <- read.csv(here("data/trait_database_raw/trait_directory_202306
   distinct(traitID, .keep_all = TRUE)
 
 # For zoop bc list from community data
-load(here("data/zoop_data_regionalized_annotated_20231018.RData"))
+load(here("data/restricted_data/zoop_data_regionalized_annotated_20231018.RData"))
 rm(zoop.bc, taxonomy, zoopmeta, clrs.bioregion, zoopdiversity, zoopenvi,
    taxalist.dfo.database, zoop.bc.excluded)
 
@@ -88,12 +88,6 @@ traits.species <- traits.lvl2 %>%
   filter(!(scientificName == "Arietellus plumifer" & traitName %in%  
              c("respirationRate","respirationRate_WSC"))) %>% 
   
-  # # Filter the taxonomic groups for analysis
-  # filter(majorgroup %in% c("Calanoid","Non-calanoid","Euphausiid","Mysid",
-  #                          "Hydromedusae","Siphonophore","Amphipod",
-  #                          "Chaetognath","Ostracod","Pteropod","Appendicularian",
-  #                          "Polychaete","Ctenophore","Thaliacean"))
-  
   # Set value confidence
   mutate(valueConf = 0)
   
@@ -116,7 +110,7 @@ mg.means <- traits.species %>%
 
 
 
-# BC species level 2 data subset
+# 3. BC species level 2 data subset
 
 ## Create species list for BC taxa in community data and the taxonIDs in the trait database.
 ```{r}
@@ -164,8 +158,8 @@ rm(list.sp, list.not.sp.1, list.not.sp.2)
 ```
 
 
-# Binary Traits
-## Genus level generalization
+## Binary Traits
+### Genus level generalization
 For categorical traits, generalize from global species pool of binary traits at genus level.
 ```{r}
 traits.binary <- traits.binary %>% 
@@ -241,7 +235,7 @@ missing.data <- missing.data %>%
 rm(gen.TG, gen.RM, gen.FM, lvl3.categorical)
 ```
 
-## Broader group level estimation for binary traits
+### Broader group level estimation for binary traits
 Actually in the scripts below, generalizing at the family level returns blank data frames because the taxa with missing trait info need to be generalized at order or class level.
 ```{r}
 # 1.1 Generalize reproduction mode at family level. 
@@ -486,8 +480,8 @@ rm(family.bin.rm, family.bin.tg, family.bin.fm, lvl3.bin.est,
 rm(missing.data, bc.traits.lvl2.binary)
 ```
 
-# Numeric traits
-## Extract from level 2 data and identify missing species
+## Numeric traits
+### Extract from level 2 data and identify missing species
 ```{r}
 bc.traits.lvl2 <- traits.species %>% 
   filter(taxonID %in% com.trt.tax.match$taxonID) %>% 
@@ -504,15 +498,12 @@ with.data <- bc.traits.lvl2 %>%
 # supposed number of taxa
 com.trt.tax.match %>% 
   distinct(Species, presence.perc) %>% 
-  # filter(presence.perc >= 3) %>%
   nrow()
 
 # evaluate completion
 with.data %>% 
-  # filter(presence.perc >= 3) %>% 
   group_by(traitName) %>% 
   summarise(ntaxa = n(), .groups = "drop") %>% 
-  # mutate(perc.taxa = ntaxa/125*100)
   mutate(perc.taxa = ntaxa/389*100) %>% 
   arrange(-ntaxa)
 
@@ -531,7 +522,7 @@ missing.data <- com.trt.tax.match %>%
 rm(with.data)
 ```
 
-## Generalizing trait values
+### Generalizing trait values
 Do this first by generalizing from species in BC waters and if not present, from the global dataset.
 ```{r}
 missing.num <- missing.data %>% 
@@ -861,7 +852,7 @@ rm(lvl3.num.est.1a, lvl3.num.est.2a, lvl3.num.est.3a, lvl3.num.est.4a,
 ```
 
 
-## Add the DFO dry weight data
+### Add the DFO dry weight data
 ```{r}
 # Prepare the bc.dw data for merging into the trait database
 bc.dw <- read.csv(here("data/bc_database_dryweights_20231108.csv")) %>% 
@@ -884,6 +875,7 @@ traits.species %>%
   select(taxonID, scientificName, traitValue.db = traitValue) %>% 
   mutate(traitValue.db = as.numeric(traitValue.db)) %>% 
   left_join(bc.dw) %>% 
+  
   # Plot species that match
   ggplot( aes(x = traitValue.db, y = traitValue)) +
     geom_abline() +
@@ -892,51 +884,7 @@ traits.species %>%
     xlab("Trait database") + ylab("DFO dry weight")
 ```
 
-
-## Calculate total carbon, nitrogen, and phosphorus content from dry weight and percent composition.
-```{r, eval=True}
-bc.dw.comp.1 <- read.csv(here("data/bc_database_dryweights_20231108.csv")) %>% 
-  left_join(lvl3.num.gen %>% 
-              filter(traitName %in% c("carbonPDW","nitrogenPDW","phosphorusPDW")),
-            by = "Species", multiple = "all") %>% 
-  filter(majorgroup %in% bc.traits.lvl2$majorgroup) %>% 
-  mutate(traitValue = as.numeric(traitValue)) %>% 
-  # Calculate total based on percent composition
-  mutate(traitValue = (traitValue/100)*dryWeight.mean, 
-         traitUnit = "mg",
-         traitName = str_replace(traitName, "PDW", "Weight")) %>% 
-  select(Species, dryWeight.mean, traitName, traitValue, traitUnit, majorgroup) %>%
-  # Average for each of the community data species names
-  group_by(Species, dryWeight.mean, traitName, traitUnit, majorgroup) %>% 
-  summarise(traitValue = mean(traitValue), .groups = "drop") %>% 
-  mutate(basisOfRecord = "calculated from composition % dry weight")
-
-# Compare the values in the records with calculated from above
-AA <- bc.dw.comp.1 %>% 
-  left_join(missing.data %>% select(Species, traitName, presence.perc)) %>% 
-  filter(is.na(presence.perc)) %>% 
-  select(-presence.perc)
-
-BB <- bc.traits.lvl2 %>% 
-  filter(traitName %in% c("carbonWeight","nitrogenWeight","phosphorusWeight")) %>% 
-  mutate(traitValue = as.numeric(traitValue))
-
-CC <- AA %>% 
-  rename(traitValue.cal = traitValue) %>% 
-  left_join(select(BB, Species, traitName, traitValue.orig = traitValue))
-
-# The trait database values generally have more higher value points (except for the carbon weight of Salpa maxima which had a large %carbon trait value).
-ggplot(CC, aes(x = traitValue.orig, y = traitValue.cal)) +
-  geom_abline() +
-  geom_point() +
-  facet_wrap(~traitName, scales = "free") +
-  xlab("trait database") + ylab("calculated from % dry weight")
-
-rm(AA, BB, CC)
-```
-
-
-# Recalculate regressions - individual level
+# 4. Recalculate regressions - individual level
 ## Excretion rates
 Separate equations for crustaceans, appendicularians, all other soft-bodied organisms
 - Can use RMA in lmodel2 but it only returns the R2 of the OLS, so unclear how to report this. The results of OLS vs RMA show a slightly steeper slope with RMA, which is explained in its vignette but it if this is significant or not. 
@@ -1040,8 +988,8 @@ for(i in 1:nrow(reg.results2)) {
 }
 ```
 
-
-## Figure of new regression equations
+ 
+## Table S2 Regression equations
 ```{r, fig.width=4}
 raw.points <- bind_rows(dw.ex, cw.rc) %>% 
   mutate(traitName = factor(traitName, levels = c("respirationRate","clearanceRate",
@@ -1076,15 +1024,9 @@ ggplot(raw.points,
                                       `excretionRateN` = "Ammonia Excretion Rate",
                                       `excretionRateP` = "Phosphate Excretion Rate")))
 
-ggsave(filename = here("figures/fig_s2_individual_level_regresssions.png"),
-    width = 8, height= 6, units = "in", dpi = 600)  
-
 # Select Models to use
 allomModels <- bind_rows(reg.results1, reg.results2) %>% 
   filter(grp %notin% c("All","GelApp"))
-# write.csv(allomModels, 
-#           file = here("for printing/table_individual_level_regressions.csv"),
-#           row.names = FALSE)
 
 # rm(dw.ex, cw.rc, df.reg.1, df.reg.2, reg.results1, reg.results2)
 ```
@@ -1093,6 +1035,24 @@ allomModels <- bind_rows(reg.results1, reg.results2) %>%
 ## Calculate rates from regression equations
 For excretion rates, the min range of the regressions are above the minimum dry weight of BC species. Here, the regressions are applied to these slightly smaller species (e.g., Oncaea). Alternatively, the generalized WSC values can be used and these mostly match the values from the regressions.
 ```{r, eval=TRUE}
+# Values from % DW
+bc.dw.comp.1 <- read.csv(here("data/bc_database_dryweights_20231108.csv")) %>% 
+  left_join(lvl3.num.gen %>% 
+              filter(traitName %in% c("carbonPDW","nitrogenPDW","phosphorusPDW")),
+            by = "Species", multiple = "all") %>% 
+  filter(majorgroup %in% bc.traits.lvl2$majorgroup) %>% 
+  mutate(traitValue = as.numeric(traitValue)) %>% 
+  # Calculate total based on percent composition
+  mutate(traitValue = (traitValue/100)*dryWeight.mean, 
+         traitUnit = "mg",
+         traitName = str_replace(traitName, "PDW", "Weight")) %>% 
+  select(Species, dryWeight.mean, traitName, traitValue, traitUnit, majorgroup) %>%
+  # Average for each of the community data species names
+  group_by(Species, dryWeight.mean, traitName, traitUnit, majorgroup) %>% 
+  summarise(traitValue = mean(traitValue), .groups = "drop") %>% 
+  mutate(basisOfRecord = "calculated from composition % dry weight")
+
+
 # Apply separately on DW and CW
 bc.dw.2 <- bc.dw %>% 
   select(-c(traitID)) %>% 
@@ -1115,8 +1075,6 @@ for (i in c(1:nrow(allomModels.sub))) {
   df.calc <- bc.dw.2 %>% 
     filter(str_detect(group, model$grp),
            traitName %in% model$X) %>% 
-    # filter(traitValue >= model$minX &
-    #        traitValue <= model$maxX) %>% 
     # Add size information
     mutate(sizeAssocName = traitName, sizeAssocValue = traitValue) %>%
     
@@ -1180,10 +1138,9 @@ for (i in c(1:nrow(allomModels.sub))) {
 }
 
 
-```
 
-### Calculate weight specific rates
-```{r}
+# Calculate weight specific rates
+
 bc.dw.rates.weight <- bind_rows(bc.dw.rate.3,bc.dw.rate.4) %>% 
   # calculate the weight sepcific value
   mutate(traitValue = traitValue/sizeAssocValue,
@@ -1195,40 +1152,6 @@ bc.dw.rates.weight <- bind_rows(bc.dw.rate.3,bc.dw.rate.4) %>%
          basisOfRecord = "calculated from individual rate and associated weight",
          valueConf = 1)
 
-
-ggplot(bc.dw.rates.weight, aes(x = sizeAssocValue, y = traitValue)) +
-  geom_point() +
-  facet_wrap(~traitName, scales = "free")
-
-# Compare with literature/generalization (for resp and clearance)
-
-# Compare generalization and regression. The generalization often produces larger trait values, except for the Salpa maxima respiration rate.
-AA <- lvl3.num.gen %>% 
-  filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC",
-                          "excretionRateN_WSDW","excretionRateP_WSDW")) %>% 
-  # filter(valueConf == 0) %>%
-  select(Species, traitName, traitValue, valueConf) %>% 
-  mutate(traitValue = as.numeric(traitValue)) %>% 
-  group_by(Species, traitName, valueConf) %>% 
-  summarise(traitValue = mean(traitValue), .groups = "drop") %>% 
-  rename(traitValue.1 = traitValue) %>% 
-  left_join(select(bc.dw.rates.weight, 
-                   Species, traitName, traitValue.2 = traitValue),
-            by = join_by(Species, traitName))
-
-ggplot(AA, aes(x = traitValue.1, y = traitValue.2)) +
-  geom_abline() +
-  geom_point(aes(color = as.factor(valueConf))) +
-  facet_wrap(~traitName, scales = "free") +
-  xlab("generalization/literature") + ylab("regression")
-
-AA %>% 
-  arrange(-traitValue.1) %>% 
-  group_by(traitName) %>% 
-  arrange(traitName) %>% 
-  filter(row_number() <= 3)
-
-rm(AA)
 ```
 
 ## Select the WS rate values
@@ -1236,7 +1159,7 @@ Use the literature values when present. Supplement these with the values calcula
 ```{r}
 # TODO Decide at what point the regression results will be used
 
-# ** IF LITERATURE + (GENERALIZATION) + REGRESSION **
+# ** IF LITERATURE + GENERALIZATION + REGRESSION **
 rates.ws.1 <- lvl3.num.gen %>%
   filter(valueConf %in% c(0)) %>%
   filter(traitName %in% c("respirationRate_WSC","clearanceRate_WSC")) %>%
@@ -1328,7 +1251,7 @@ lvl3.numeric <-
 ```
 
 
-# Finalize numeric traits 
+# 5. Finalize numeric traits 
 ```{r}
 lvl3.num.matrix <- lvl3.numeric %>% 
   select(Species, traitName, traitValue) %>% 
@@ -1353,6 +1276,11 @@ missing.num <- com.trt.tax.match %>%
   filter(is.na(withData)) %>% 
   select(-withData) 
   
+missing.num %>% 
+  group_by(traitName) %>% 
+  filter(presence.perc >= 3) %>% 
+  dplyr::count()
+
 # Estimated data coverage
 lvl3.numeric %>% 
   filter(!is.na(traitValue)) %>% 
@@ -1379,10 +1307,9 @@ AA <- lvl3.numeric %>%
   mutate(beyondRange = if_else(traitValue < tval.min |
                                  traitValue > tval.max, TRUE, FALSE)) %>% 
   filter(beyondRange == TRUE)
-  # filter(zScore > 4)
 ```
 
-# Export the trait data
+# 6. Export the trait data
 ```{r}
 # save(lvl3.cat.matrix, lvl3.num.matrix, lvl3.categorical, lvl3.numeric, zoop.bc.list, allomModels,
 #      file = here("data/BC_species_trait_matrices_20240604.RData"))

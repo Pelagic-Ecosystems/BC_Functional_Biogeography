@@ -7,10 +7,6 @@ output: html_document
 
 This file identifies the functional groups based on a cluster analysis of the gawdis dissimilarity between 8 traits. Figures exploring how the functional groups are projected in the trait space and the relationship of the other traits not used in the gawdis analysis to the trait space are generated. 
 
-Additionally: 
-- The significant differences in the means and ranges of trait values are compared between functional groups. 
-- The proportion of functional groups to each of the association groups in Pata et al. (2022) are visualized.
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -110,17 +106,6 @@ trait.list <- data.frame(
                                "reproductionMode",trait.group),
          trait.group = if_else(grepl("TG.",trait.group),
                                "trophicGroup",trait.group))
-
-# # List the species with trait values estimated at the order level or higher
-# lvl3.numeric %>% 
-#   filter(traitName %in% c("waterPWW","dryWeight",
-#                 "respirationRate_WSC", "clearanceRate_WSC",
-#                 "excretionRateN_WSDW")) %>% 
-#   filter(presence.perc > 1) %>% 
-#   filter(valueConf >= 4) %>% 
-#   group_by(Species, majorgroup, presence.perc) %>% 
-#   summarise(ntraits = n()) %>% 
-#   view()
 ```
 
 
@@ -143,12 +128,12 @@ trait.cor.list <- data.frame(
                 "TG.herbivore","TG.omnivore","TG.carnivore","TG.detritivore"),
   label = c("Dry weight","Water content", 
                 "Ws. respiration rate", "Ws. clearance rate",
-                "Ws. ammonia excretion rate", "Ws. phosphate excretion rate",
+                "Ws. ammonium excretion rate", "Ws. phosphate excretion rate",
                 "Body length", "Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "C:N ratio","N:P ratio","C:P ratio",
                 "Ind. respiration rate", "Ind. clearance rate",
-                "Ind. ammonia excretion rate", "Ind. phosphate excretion rate",
+                "Ind. ammonium excretion rate", "Ind. phosphate excretion rate",
                 "Carbon weight","Nitrogen weight","Phosphorus weight",
                 "Broadcasting","Brooding",
                 "Cruise","Current","Active Ambush","Passive Ambush",
@@ -190,8 +175,7 @@ species.traits2 <- lvl3.num.matrix %>%
          carbonWeight = log(carbonWeight),
          nitrogenWeight = log(nitrogenWeight),
          phosphorusWeight = log(phosphorusWeight)) %>% 
-  # Remove species with high uncertainty in trait estimates + rare species
-  # filter(Species %in% filter(zoop.bc.list, presence.perc >= 1)$Species) %>% 
+  
   filter(Species %in% species.include.list$Species) %>%
   # combine with categorical data as fuzzy variables
   left_join(lvl3.cat.matrix, by = "Species") %>% 
@@ -282,9 +266,6 @@ ggplot() +
         panel.background = element_rect(fill='white'),
         plot.background = element_rect(fill='white', color=NA))
 
-ggsave(filename = here("figures/fig_s4_correlation_matrix_traits_analyzed.png"),
-    width = 18, height= 16, units = "in", dpi = 300)
-
 # rm(trait.cor.list, trait.cor, cor.tests, cor.table, res, AA)
 ```
 
@@ -301,11 +282,6 @@ gaw.dist <- gawdis::gawdis(species.traits,
                            fuzzy = c("feedingMode","trophicGroup",
                                      "reproductionMode"),
                            opti.maxiter = 1000)
-
-
-# # Save gawdist matrix
-# save(gaw.dist,
-#      file = here("data/gawdis_results_traits8.RData"))
 
 # Correlation between traits
 cor.mat <- attr(gaw.dist, "cor.mat")
@@ -338,7 +314,7 @@ Scaled: scaling distances in functional space to have the same maximum
 *NOTE* That the PCoA from the quality.fspaces() function is the same as calculating pcoa(gaw.dist, correction = "cailliez") 
 
 The unscaled metrics selected 5 axes as the best representation of the trait space, while the scaled metrics selected 6 axes. For the scaled metrics, the difference in quality values between the 5-axis and 6-axis solutions are small relative to the other dimensions, so the more parsimonious 5-axis solution is selected.
-```{r, fig.width=6}
+```{r}
 gaw.space <- mFD::quality.fspaces(sp_dist = gaw.dist,
                              fdendro = "average",
                              maxdim_pcoa = 9,
@@ -358,13 +334,11 @@ gaw.space$"quality_fspaces" %>%
                                color = quality_metric, shape = quality_metric)) +
   ggplot2::geom_point() 
 
-mFD::quality.fspaces.plot(
-  fspaces_quality = gaw.space, 
-  quality_metric  = "mad",
-  fspaces_plot    = c("tree_average", "pcoa_2d", "pcoa_5d",'pcoa_9d'))
 
-# ggsave(filename = here("figures/extra_quality_functional_space_reduction.png"),
-#     width = 13, height= 10, units = "in", dpi = 300, bg = "white")
+## Save gawdis analysis results
+# save(gaw.space, gaw.dist, species.include.list,
+#   file = here("data/fundiv_gawdis_results_20240729.RData")
+# )
 ```
 
 # 4. Cluster functional groups
@@ -398,14 +372,10 @@ ggplot(gci.a, aes(x = Num_Clusters, y = `Index Value`)) +
   scale_x_continuous(breaks = seq(2,20,1)) +
   xlab("Number of Clusters") +
   facet_wrap(~ Index, nrow = 2, scales = "free")
-
-
-ggsave(filename = here("figures/fig_s5_functional_groups_goodness_clustering.png"),
-    width = 6, height= 4, units = "in", dpi = 300, bg = "white")
 ```
 
 
-# 5. Finalize dendrogram and cluster names
+# 5. Fig2 Dendrogram and cluster names
 The branches of the dendrogram are rotated first before exporting the figure. The rotation is based on the file fg_cluster_revised.csv which was manually annotated. After producing the dendrogram figure, it will be annotated in another software to improve the final figure used in the manuscript.
 ```{r}
 species.pcoa <- gaw.space$details_fspaces$sp_pc_coord[,c(1:5)]
@@ -481,7 +451,7 @@ dev.off()
 
 
 
-# 6. Plot the distirbution of each species in a functional group along each trait axis.
+# 6. FigS2 Distirbution of each species in a functional group along each trait axis.
 ## Numeric traits 
 ```{r, eval=TRUE}
 traits.num <- lvl3.num.matrix %>% 
@@ -497,9 +467,9 @@ traits.num <- lvl3.num.matrix %>%
 # Labels of subplots
 tname_label = c("Water content","Body length","Dry weight","Carbon weight",
                 "Ws. respiration rate","Ws. clearance rate",
-                "Ws. ammonia excretion rate","Ws. phosphate excretion rate",
+                "Ws. ammonium excretion rate","Ws. phosphate excretion rate",
                 "Ind. respiration rate","Ind. clearance rate",
-                "Ind. ammonia excretion rate","Ind. phosphate excretion rate",
+                "Ind. ammonium excretion rate","Ind. phosphate excretion rate",
                 "Nitrogen weight","Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "Phosphorus weight","C:N","N:P","C:P")
@@ -538,10 +508,6 @@ for (tname in c("waterPWW","bodyLength","dryWeight","carbonWeight",
     # geom_point(shape = 19, size = 4, alpha = 0.5) +
     geom_boxplot(outlier.shape = NA) +
     geom_point(shape = 4) +
-    
-    # geom_dotplot(binaxis='y', stackdir='center', 
-    #              position = "dodge", aes(fill = fungrp)) +
-  
     scale_color_manual(values = fungrp.colors) +
     scale_fill_manual(values = fungrp.colors) +
     scale_y_discrete(limits = rev) +
@@ -566,7 +532,6 @@ for (tname in c("waterPWW","bodyLength","dryWeight","carbonWeight",
 ```{r}
 fungrp.cat <- od.revised %>% 
   select(Species, fungrp) %>% 
-  # mutate(fungrp = as.numeric(fungrp)) %>% 
   group_by(fungrp) %>% 
   mutate(nspecies = n()) %>% 
   ungroup() %>% 
@@ -653,16 +618,18 @@ plot_grid(
   plot_grid(plotlist=traitplots, ncol = 4),
   ncol = 1, rel_heights = c(1.2,5))
 
-ggsave(file = here("figures/fig_s6_fungrps_values.png"),
+ggsave(file = here("figures/fig_s2_fungrps_values.png"),
        height = 14, width = 12, dpi = 300)
 ```
 
-# 7. Trait space plots
+# 7. Fig3 Trait space plots
 The scripts in this section plots the projection of the species along the 5-axis trait space. Species are first colored by taxonomic groups, then by functional groups. Biplots showing the correlation of the traits to the trait space axes are then visualized for the 8 traits used in the functional group analysis and for the rest of the colinear traits that were excluded from the analysis above.
 
 ## Set 1 Taxonomic grouping
 ```{r}
+# Correctly label axes as PCoA
 axisname <- colnames(pcoa.vec[,c(2:6)])
+axisname_label <- str_replace(axisname, "PC", "PCoA ")
 
 # Axis 1 & 2
 axestoplot <- c(1,2)
@@ -680,7 +647,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g1 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -713,7 +681,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g2 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -746,7 +715,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g3 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -793,7 +763,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g1 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "fungrp")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -826,7 +797,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g2 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "fungrp")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -859,7 +831,8 @@ hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 # Plot trait space
 g3 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "fungrp")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
                 color = "grey30", fill = "white", show.legend = FALSE) +
   geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
@@ -926,7 +899,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
 g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
@@ -937,7 +911,7 @@ g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
       geom_segment(data = U1, aes(x = rep(0,nrow(U1)),y =rep(0,nrow(U1)),
                                  xend = U1[,1],yend = U1[,2]),
                    lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U1, color = "black", shape = 8) +
+  geom_point(data = U1, color = "grey80", shape = 8) +
   geom_text_repel(data = U1, aes(label=rownames(U1),), 
                   color="black", size = 4)
 
@@ -959,7 +933,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
 g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]],
+       y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
@@ -970,7 +945,7 @@ g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
   geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
                              xend = U2[,1],yend = U2[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U2, color = "black", shape = 8)+
+  geom_point(data = U2, color = "grey80", shape = 8)+
   geom_text_repel(data = U2, aes(label=rownames(U2),), 
                   color="black", size = 4)
 
@@ -991,7 +966,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos *2
 # Plot trait space
 g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]],
+       y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
@@ -1002,7 +978,7 @@ g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
   geom_segment(data = U3, aes(x = rep(0,nrow(U3)),y =rep(0,nrow(U3)),
                               xend = U3[,1],yend = U3[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U3, color = "black", shape = 8)+
+  geom_point(data = U3, color = "grey80", shape = 8)+
   geom_text_repel(data = U3, aes(label=rownames(U3),), 
                   color="black", size = 4)
 
@@ -1020,14 +996,15 @@ traits.num.2 <- distinct(pcoa.vec, Species) %>%
   pivot_wider(names_from = "name", values_from = "val") %>% 
   column_to_rownames("Species")
 # Adjust column names
-trait.labels <- c("water content", "carbon content", "nitrogen content",
-                  "phosphorus content", "C:N", "N:P", "C:P", 
-                  "body length", "dry weight", "carbon weight",
-                  "nitrogen weight", "phosphorus weight",
-                  "ws. respiration rate", "ws. clearance rate",
-                  "ws. excretion rate N", "ws. excretion rate P",
-                  "ind. respiration rate", "ind. clearance rate",
-                  "ind. excretion rate N", "ind.excretion rate P")
+trait.labels <- c("%water", "%C", "%N","%P", 
+                  "C:N", "N:P", "C:P", 
+                  "body length", "dry weight", 
+                  "C weight",
+                  "N weight", "P weight",
+                  "ws. respiration", "ws. clearance",
+                  "ws. N excretion", "ws. P excretion",
+                  "ind. respiration", "ind. clearance",
+                  "ind. N excretion", "ind. P excretion")
 colnames(traits.num.2) <- trait.labels
 
 traits.pcoa.cor <- cor(scale(traits.num.2 , center=TRUE, scale=TRUE), 
@@ -1062,7 +1039,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
 g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]],
+       y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
@@ -1073,7 +1051,7 @@ g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
       geom_segment(data = U1, aes(x = rep(0,nrow(U1)),y =rep(0,nrow(U1)),
                                  xend = U1[,1],yend = U1[,2]),
                    lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U1, color = "black", shape = 8) +
+  geom_point(data = U1, color = "grey80", shape = 8) +
   geom_text_repel(data = U1, aes(label=rownames(U1),), 
                   color="black", size = 4) +
   xlim(min(U1[,1])-0.05, max(U1[,1])+0.05) +
@@ -1096,7 +1074,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
 g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]],
+         y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
@@ -1107,7 +1086,7 @@ g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
   geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
                              xend = U2[,1],yend = U2[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U2, color = "black", shape = 8)+
+  geom_point(data = U2, color = "grey80", shape = 8)+
   geom_text_repel(data = U2, aes(label=rownames(U2),), 
                   color="black", size = 4) +
   xlim(min(U2[,1])-0.05, max(U2[,1])+0.05) +
@@ -1129,7 +1108,8 @@ pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos *2
 # Plot trait space
 g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname[axestoplot[1]], y = axisname[axestoplot[2]]) +
+  labs(x = axisname_label[axestoplot[1]],
+         y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme(aspect.ratio = 1, legend.position="none", 
@@ -1140,7 +1120,7 @@ g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
   geom_segment(data = U3, aes(x = rep(0,nrow(U3)),y =rep(0,nrow(U3)),
                               xend = U3[,1],yend = U3[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U3, color = "black", shape = 8)+
+  geom_point(data = U3, color = "grey80", shape = 8)+
   geom_text_repel(data = U3, aes(label=rownames(U3),), 
                   color="black", size = 4) +
   xlim(min(U3[,1])-0.05, max(U3[,1])+0.05) +
@@ -1157,9 +1137,9 @@ ggsave(filename = here("figures/fig_3_Gawdis_species_trait_PCOA.png"),
 
 # 8. Export information
 ```{r}
-save(pcoa.vec, od.revised, species.traits, traits.num,
-     fungrp.colors, majorgroup.colors, tname_label,
-     file = here("data/functional_grouping_results_20240617.RData"))
+# save(pcoa.vec, od.revised, species.traits, traits.num,
+#      fungrp.colors, majorgroup.colors, tname_label,
+#      file = here("data/functional_grouping_results_20240617.RData"))
 ```
 
 

@@ -5,7 +5,7 @@ date: "2023-10-27"
 output: html_document
 ---
 
-This file subsets the zooplankton trait database for relevant traits required in the analysis of the associated manuscript. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the trait database changes, please uncomment the data saving scripts in lines 270 and 498. 
+This file subsets the zooplankton trait database for relevant traits required in the analysis of the associated manuscript. There is no need to rerun the scripts within this file since the output data is already produced as saved in the data/ folder. If the curation of the trait database changes, please uncomment the data saving scripts in lines 270 and 415. 
 
 This will be based on Level 1 trait data. New information can be added to this without having to overhaul the trait database.
 
@@ -106,7 +106,6 @@ lvl1 <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.c
   filter(traitName %in% trait.list) %>% 
   filter(valueType == "numeric") %>% 
   mutate(traitValue = as.numeric(traitValue)) %>% 
-  # filter(majorgroup %notin% mg.exclude) %>% 
   
   # ** Manual curation **
   
@@ -133,6 +132,7 @@ lvl1 <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.c
   # exclude clearance rates for Tortanus (Boreotortanus) discaudatus which is a magnitude higher than other Tortanus values
   filter(!(scientificName == "Tortanus (Boreotortanus) discaudatus" &
              traitName %in% c("clearanceRate_15C","clearanceRate_WSC_15C"))) 
+
 # convert dryWeightPWW to waterPWW
 lvl1.dwww <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.csv")) %>% 
   filter(traitName == "dryWeightPWW") %>% 
@@ -272,82 +272,7 @@ majorgroup.colors <- data.frame(
 ```
 
 
-# 3. Create major group summary table and figures
-```{r, fig.width=6}
-# Summary table
-mg.table <- traits.lvl1 %>% 
-  group_by(traitName, majorgroup) %>% 
-  summarise(nobs = n(), nsp = length(unique(scientificName)),
-            tv.mean = mean(traitValue), tv.sd = sd(traitValue),
-            tv.min = min(traitValue), tv.max = max(traitValue),
-            .groups = "drop")
-
-# 
-# my_controls <- tableby.control(
-#   test = T,
-#   total = T,
-#   numeric.stats = c("N","meansd","range"),
-#   stats.labels = list(
-#     meansd = "Mean (SD)",
-#     range = "Min - Max",
-#     N = "Nrecords"),
-#   digits = 2
-# )
-# 
-# traits.lvl1.long <- traits.lvl1 %>% 
-#   select(majorgroup, traitName, traitValue) %>% 
-#   pivot_wider(names_from = traitName, values_from = traitValue) 
-#   
-# mg.table <- tableby(majorgroup ~ traitValue,
-#                     data = traits.lvl1 %>% filter(traitName == "carbonPDW"),
-#                     control = my_controls)
-# summary(mg.table)
-
-# Number of records and species
-ggplot(mg.table, aes(x = majorgroup, y = traitName)) +
-  geom_tile(aes(fill = nobs)) +
-  geom_text(aes(label = nsp), color = "black",) +
-  scale_y_discrete(limits = rev)+
-  scale_fill_distiller(limits = c(0,200), oob = scales::squish) +
-  scale_x_discrete(guide = guide_axis(n.dodge = 2)) 
-
-
-# ggsave(filename = here("figures/trait_distribution_numspecies.png"),
-#     width = 10, height= 8, units = "in", dpi = 300, bg = "white")
-
-
-# Distribution of data
-g1 <- ggplot(traits.lvl1 %>% filter(grepl("PDW|PWW|CP|NP|CN", traitName)), 
-       aes(x = majorgroup, y = traitValue, color = majorgroup)) +
-  geom_boxplot() +
-  scale_color_manual(values = majorgroup.colors$color, name = "major group") + 
-  theme(axis.text.x = element_blank(), axis.title.x = element_blank(),
-        legend.position = "none") +
-  facet_wrap(~traitName, scales = "free_y", ncol = 4)
-
-g2 <- ggplot(traits.lvl1 %>% filter(!grepl("PDW|PWW|CP|NP|CN", traitName)), 
-       aes(x = majorgroup, y = traitValue, color = majorgroup)) +
-  geom_boxplot() +
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
-                labels = trans_format("log10", math_format(10^.x))) +
-  scale_color_manual(values = majorgroup.colors$color) + 
-  theme(axis.text.x = element_blank(),
-        legend.position = "none") +
-  facet_wrap(~traitName, scales = "free_y")
-
-legend_b1 <- get_legend( g1 + 
-                           guides(color = guide_legend(ncol = 1)) +
-                           theme(legend.position = "right"))
-
-plot_grid(plot_grid(g1, g2, ncol = 1, rel_heights = c(2,4)),
-          legend_b1, nrow = 1, rel_widths = c(10,1))
-
-# ggsave(filename = here("figures/extra_trait_distribution_level1.png"),
-#     width = 15, height= 10, units = "in", dpi = 300, bg = "white")
-```
-
-
-# 4. Species level data
+# 3. Species level data
 ## Calculate species level averages
 These are weighted means when the N and sd were reported.
 ```{r}
@@ -409,7 +334,7 @@ traits.species <- traits.lvl1 %>%
 
 
 ## Convert categorical traits to binary per species
- Work on level 1 data
+Work on level 1 data
 ```{r}
 trait.cat <- read.csv(here("data/trait_database_raw/trait_dataset_level1-2023-08-15.csv")) %>% 
   filter(traitName %in% c("trophicGroup","feedingMode","reproductionMode")) %>% 
@@ -442,13 +367,6 @@ trait.FM <- trait.cat %>%
                                        traitValue)==TRUE,1,0)) %>% 
   mutate(FM.passive.ambush = if_else(grepl("passive ambush",
                                         traitValue)==TRUE,1,0)) %>% 
-  # mutate(FM.active = if_else(grepl("active",traitValue)==TRUE & 
-  #                         grepl("active ambush",traitValue)==FALSE,
-  #                         1,0)) %>%  
-  # mutate(FM.passive = if_else(grepl("passive",traitValue)==TRUE,1,0)) %>% 
-  # mutate(FM.ambush = if_else(grepl("ambush",traitValue)==TRUE,1,0)) %>% 
-  # mutate(FM.particle.feeder = if_else(grepl("particle feeder",
-  #                                        traitValue)==TRUE,1,0)) 
   select(-c(traitName, traitValue)) %>% 
   pivot_longer(cols = c(FM.cruise, FM.current, 
                         FM.active.ambush, FM.passive.ambush), 

@@ -1,0 +1,403 @@
+---
+title: "Comparison of bioregions"
+author: "Patrick Pata"
+date: "2024-06-25"
+output: html_document
+---
+
+This file calculates the community level trait totals and community weighted means for each sample. These can be recalculated with the species-level community data but the results of the calculations are provided in the community_metrics_*.RData file to allow further visualization and analysis.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 1. Load libraries and data
+```{r}
+library(tidyverse)
+library(here)
+library(ggtext)
+library(scales)
+library(cowplot)
+library(broom)
+
+set_here(path = "..")
+`%notin%` <- Negate(`%in%`)
+theme_set(theme_bw())
+
+# Functional group data + traits
+load(here("data/functional_grouping_results_20240617.RData"))
+
+# FG density, CWM, and community total data
+load(here("data/community_metrics_3721_163species_20250217.RData"))
+
+regions <- c("Offshore","DeepShelf","Nearshore","DeepFjord")
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+
+
+fungrp.colors <- c("turquoise3", "steelblue2","darkorange2",
+                   "orchid","magenta4","lightcoral",
+                   "gold3","darkgreen","darkolivegreen4",
+                   "olivedrab3")
+                   
+standard_temp <- function(rate0, t0, t = 15, Q10 = 2.8) {
+  10^(log10(rate0) + log10(Q10)*((t-t0)/10) )
+}
+```
+
+
+# 2. Community level traits
+## Calculate CWM and proportions of traits
+```{r, eval=FALSE}
+# Load data of samples with updated bioregions and functional groups
+load(here("data/restricted_data/samples_species_fg_abundance_biomass_20250217.RData"))
+
+# Organize the trait data
+all.traits <- species.traits[,6:15] %>% 
+  rownames_to_column("Species") %>% 
+  left_join(traits.num, by = "Species") %>% 
+  pivot_longer(cols = -Species, 
+               names_to = "traitName",
+               values_to = "traitValue")
+
+zoop.163.density <- zoop.bc.species.fun %>% 
+  filter(Species %in% all.traits$Species) %>%  
+  group_by(Key, Tow.Depth, Bioregion, fungrp) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2), Abundance.m3 = sum(Abundance.m3),
+         Biomass.mg.m2 = sum(Biomass.mg.m2), Biomass.mg.m3 = sum(Biomass.mg.m3), 
+         .groups = "drop")
+
+zoop.163.cwm <- zoop.bc.species.fun %>% 
+  filter(Species %in% all.traits$Species) %>% 
+  left_join(all.traits, by = "Species") %>% 
+  rename(Trait = traitName) %>% 
+  # Calculate community weighted mean
+  group_by(Key, Bioregion, Trait) %>% 
+  summarise(CWM = weighted.mean(traitValue, Biomass.mg.m2),
+            .groups = "drop")
+```
+
+## Calculate community trait totals
+```{r, eval=FALSE}
+# Load the complete community data for community totals
+load(here("data/restricted_data/BC_3721_163_speciesstage_20241024.RData"))
+
+all.traits.wide <- all.traits %>% 
+  filter(traitName %in% c("dryWeight","carbonWeight",
+                      "nitrogenWeight","phosphorusWeight",
+                      "respirationRate","clearanceRate",
+                      "excretionRateN","excretionRateP")) %>% 
+  pivot_wider(names_from = traitName, values_from = traitValue)
+  
+
+# Actually calculate weights and individual rates from % and weight specific
+zoop.spstg.ctotal <- zoop.fg.com %>% 
+  mutate(dryWeight = `Biomass(mg/m3)` / `Abundance(#/m3)`) %>% 
+  left_join(traits.num %>% 
+              select(Species, waterPWW, carbonPDW, nitrogenPDW, phosphorusPDW,
+                     respirationRate_WSC, clearanceRate_WSC, 
+                     excretionRateN_WSDW, excretionRateP_WSDW,
+                     ratioCN, ratioNP, ratioCP, bodyLength),
+            join_by(Species == Species)) %>% 
+  # This filter will effectively exclude all species-stage records that were not included in the taxonomic bioregionalization
+  filter(!is.na(carbonPDW)) %>% 
+  # Calculate C,N,P weights
+  mutate(carbonWeight = dryWeight * carbonPDW/100,
+         nitrogenWeight = dryWeight * nitrogenPDW/100,
+         phosphorusWeight = dryWeight * phosphorusPDW/100) 
+ 
+# If temp.mean is not present, use the bioregion averages
+bioreg.temp <- zoop.spstg.ctotal %>% 
+  filter(!is.na(temp.mean)) %>% 
+  distinct(Bioregion, Key, temp.mean) %>% 
+  group_by(Bioregion) %>% 
+  summarise(RegionTemp = mean(temp.mean), 
+            .groups = "drop") 
+
+zoop.spstg.ctotal <- zoop.spstg.ctotal %>%
+  left_join(bioreg.temp) %>% 
+  mutate(temp.mean = if_else(is.na(temp.mean), RegionTemp, temp.mean)) %>% 
+  # Adjust rates to the net integrated temperature
+  mutate(respirationRate_WSC = standard_temp(respirationRate_WSC, t0 = 8.5,
+                                             t = temp.mean, Q10 = 2.8),
+         clearanceRate_WSC = standard_temp(clearanceRate_WSC, t0 = 8.5,
+                                           t = temp.mean, Q10 = 2.8),
+         excretionRateN_WSDW = standard_temp(excretionRateN_WSDW, t0 = 8.5,
+                                             t = temp.mean, Q10 = 2.0),
+         excretionRateP_WSDW = standard_temp(excretionRateP_WSDW, t0 = 8.5,
+                                             t = temp.mean, Q10 = 1.55)) %>%
+  # Calculate individual specific rates
+  mutate(respirationRate = carbonWeight * respirationRate_WSC,
+         clearanceRate = carbonWeight * clearanceRate_WSC, 
+         excretionRateN = dryWeight * excretionRateN_WSDW,
+         excretionRateP = dryWeight * excretionRateP_WSDW) 
+
+# save(zoop.spstg.ctotal,
+#   file = here("data/restricted_data/BC_3721_163_speciesstage_traits_20250217.RData"))
+
+# Calculate the total community level traits and abundance + biomass for each sample
+zoop.163.ctotal <- zoop.spstg.ctotal %>%
+  mutate(Abundance.m2 = `Abundance(#/m3)` * Depth_Start) %>% 
+  mutate(Biomass.mg.m2 = `Biomass(mg/m3)` * Depth_Start) %>% 
+  
+  # Calculate community totals
+  group_by(Key, Bioregion, fungrp) %>%
+  summarise(totalDryWeight = sum(dryWeight * Abundance.m2),
+            totalCarbonWeight = sum(carbonWeight * Abundance.m2),
+            totalNitrogenWeight = sum(nitrogenWeight * Abundance.m2),
+            totalPhosphorusWeight = sum(phosphorusWeight * Abundance.m2),
+            totalRespirationRate = sum(respirationRate * Abundance.m2),
+            totalClearanceRate = sum(clearanceRate * Abundance.m2),
+            totalExcretionRateN = sum(excretionRateN * Abundance.m2),
+            totalExcretionRateP = sum(excretionRateP * Abundance.m2),
+            Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2),
+            .groups = "drop") %>% 
+ 
+  # Lengthen
+  pivot_longer(cols = c(totalDryWeight:Biomass),
+               names_to = "Trait", values_to = "CTotal") %>% 
+
+  # Sum for each samples
+  group_by(Key, Bioregion, Trait) %>% 
+  summarise(CTotal = sum(CTotal), .groups = "drop")
+ 
+
+# Community total traits by functional group 
+zoop.163.ctotal.ave <- zoop.spstg.ctotal %>%
+  mutate(Abundance.m2 = `Abundance(#/m3)` * Depth_Start) %>% 
+  mutate(Biomass.mg.m2 = `Biomass(mg/m3)` * Depth_Start) %>% 
+  
+  # Calculate community totals
+  group_by(Key, Bioregion, fungrp) %>%
+  summarise(dryWeight = sum(dryWeight * Abundance.m2),
+            carbonWeight = sum(carbonWeight * Abundance.m2),
+            nitrogenWeight = sum(nitrogenWeight * Abundance.m2),
+            phosphorusWeight = sum(phosphorusWeight * Abundance.m2),
+            respirationRate = sum(respirationRate * Abundance.m2),
+            clearanceRate = sum(clearanceRate * Abundance.m2),
+            excretionRateN = sum(excretionRateN * Abundance.m2),
+            excretionRateP = sum(excretionRateP * Abundance.m2),
+            Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2),
+            .groups = "drop") %>% 
+  
+  # pad zeros to empty FGs (not really necessary... because the Key-Bioregion-FG pair with blanks will never show up (e.g., FG2))
+  pivot_longer(cols = c(dryWeight:Biomass),
+               names_to = "Metric", values_to = "Value") %>% 
+  pivot_wider(names_from = Metric, values_from = Value,
+              values_fill = 0) %>%
+  pivot_longer(cols = c(dryWeight:Biomass),
+               names_to = "Metric", values_to = "Value") %>% 
+  
+  # Average across all values (not staggered by year-month)
+  group_by(Bioregion, Metric, fungrp) %>% 
+  summarise(Value.mean = mean(Value),
+            Value.sd = sd(Value),
+            nsamples = n(), .groups = "drop") %>% 
+  mutate(Value.se = Value.sd / sqrt(nsamples)) %>% 
+  mutate(fungrp = factor(fungrp, levels = c("1","2","3","4","5","6",
+                                            "7","8","9","10")))
+
+
+# Export values
+save(zoop.163.density, zoop.163.cwm, zoop.163.ctotal, zoop.163.ctotal.ave,
+  file = here("data/community_metrics_3721_163species_20250217.RData"))
+```
+
+
+
+# 3. Fig4 Community total trait values and average contribution of the functional groups
+```{r}
+zoop.163.ctotal.plot <- zoop.163.ctotal.ave %>% 
+  filter(Metric %notin% c("Biomass","nitrogenWeight", 
+                          "phosphorusWeight", "dryWeight")) %>% 
+  mutate(Metric = if_else(Metric == "carbonWeight",
+                          "Carbon Weight", Metric),
+         Metric = if_else(Metric == "clearanceRate",
+                          "Clearance Rate", Metric),
+         Metric = if_else(Metric == "respirationRate",
+                          "Respiration Rate", Metric),
+         Metric = if_else(Metric == "excretionRateN",
+                          "Ammonium Excretion Rate", Metric),
+         Metric = if_else(Metric == "excretionRateP",
+                          "Phosphate Excretion Rate", Metric)) %>% 
+  mutate(Metric = factor(Metric, levels = c("Abundance","Carbon Weight",
+                                            "Respiration Rate",
+                                            "Ammonium Excretion Rate",
+                                            "Phosphate Excretion Rate",
+                                            "Clearance Rate")))
+
+
+# Cowplot version
+metrics <- levels(zoop.163.ctotal.plot$Metric)
+plots <- vector("list",2)
+count <- 1
+for (i in c(1:6)) {
+   plots[[count]] <- ggplot(zoop.163.ctotal.plot %>% 
+                                  filter(Metric == metrics[i]), 
+                                aes(x = Bioregion, y = Value.mean)) +
+      geom_bar(aes(fill = fungrp), position = "stack", stat = "identity") +
+      scale_fill_manual(values = rev(fungrp.colors), 
+                        name = "Functional\nGroup") +
+      scale_y_continuous(expand = c(0, 0),
+                         name =unique(metrics[i])) +
+      theme(legend.position = "none",
+            axis.title.y.right = element_markdown()) 
+  
+  count <- count + 1
+}
+
+# Combine the plots into a grid
+plot_grid_layout <- plot_grid(plotlist = plots, ncol = 3, labels = "auto") 
+plot_grid_layout
+
+
+# Seems like get_legend() does not work anymore for the updated ggplot version3.5 .. have to manually annotate the legend for now
+# legend_b1 <- get_legend(
+#   plots[[1]]+
+#     theme(legend.position = "bottom") )
+# final_plot <- plot_grid(
+#   plot_grid_layout, legend_b1, 
+#   ncol = 1, 
+#   rel_heights = c(3, 0.3) 
+# )
+
+ggsave(filename = here("figures/fig_4_com_total_rates.png"),
+       width = 12, height= 6, units = "in", dpi = 600, bg = "white")
+
+# For manual legend annotation
+ggplot(zoop.163.ctotal.plot,
+  aes(x = Bioregion, y = Value.mean)) +
+  geom_bar(aes(fill = fungrp), position = "stack", stat="identity") +
+  scale_fill_manual(values = rev(fungrp.colors),
+           name = "Functional Group",
+           labels = paste0("FG", unique(zoop.163.ctotal.plot$fungrp))) +
+  scale_y_continuous(expand = c(0, 0),
+                     name = "Community Total Value") +
+  theme(legend.position = "bottom",  
+        legend.box = "horizontal",
+        axis.title.y.right = element_markdown()) +
+  guides(fill = guide_legend(nrow = 1, 
+                             size = 12,
+                            label.position = "right",
+                            byrow = TRUE)) +
+  facet_wrap(~Metric, scales = "free_y")
+
+
+ggsave(filename = here("figures/fig_4_com_total_rates_legend.png"),
+       width = 12, height= 10, units = "in", dpi = 600, bg = "white")
+
+```
+
+# 4. Table1 Bioregion comparison
+
+## Sig test CWM 
+```{r}
+Trait.labs <- c("Body length","Dry weight","Water content",
+               "Carbon weight",
+               "Nitrogen weight","Phosphorus weight",
+               "Carbon content","Nitrogen content","Phosphorus content",
+               "C:N","C:P","N:P",
+               "Ind. respiration rate","Ws. respiration rate",
+               "Ind. ammonium\nexcretion rate","Ws. ammonium\nexcretion rate",
+               "Ind. phosphate\nexcretion rate",
+               "Ws. phosphate\nexcretion rate",
+               "Ind. clearance rate", "Ws. clearance rate",
+               "Prop. current feeders","Prop. cruise feeders",
+               "Prop. active\nambush feeders","Prop. passive\nambush feeders",
+               "Prop. herbivores","Prop. omnivores","Prop. carnivores",
+               "Prop. detritivores",
+               "Prop. broadcast\nspawning","Prop. brood\nspawning")
+names(Trait.labs) <- c("bodyLength","dryWeight","waterPWW",
+               "carbonWeight","nitrogenWeight","phosphorusWeight",
+               "carbonPDW","nitrogenPDW","phosphorusPDW","ratioCN","ratioCP","ratioNP",
+               "respirationRate","respirationRate_WSC",
+               "excretionRateN","excretionRateN_WSDW",
+               "excretionRateP", "excretionRateP_WSDW",
+               "clearanceRate","clearanceRate_WSC",
+               "FM.current","FM.cruise","FM.active.ambush","FM.passive.ambush",
+               "TG.herbivore","TG.omnivore","TG.carnivore","TG.detritivore",
+               "RM.broadcasting","RM.brooding")
+
+cwm.kw <- zoop.163.cwm %>% 
+  group_by(Trait) %>% 
+  do(tidy(kruskal.test(x=.$CWM, g =.$Bioregion)))
+
+cwm.dunn <- zoop.163.cwm %>% 
+  group_by(Trait) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$CWM, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005) %>% 
+  arrange(match(Trait, names(Trait.labs)))
+
+
+cwm.sum <- zoop.163.cwm %>% 
+  group_by(Bioregion, Trait) %>% 
+  summarise(ValMean = mean(CWM),
+            ValSD = sd(CWM), 
+            ValMedian = median(CWM),
+            ValIQR = IQR(CWM),
+            ValMin = min(CWM),
+            ValMax = max(CWM),
+            ValN = n(),
+            .groups = "drop") %>% 
+  arrange(Bioregion, Trait) 
+
+
+# Per bioregion and functional group
+cwm.table <- cwm.sum %>% 
+  select(Bioregion, Trait, ValMean, ValSD) %>% 
+  mutate(ValText = if_else(Trait %in% c("detritivore","phosphorusWeight"), 
+           paste(round(ValMean,3),"\u00b1",round(ValSD,3)),
+           paste(round(ValMean,2),"\u00b1",round(ValSD,2)))) %>% 
+  select(-c(ValMean, ValSD)) %>% 
+  pivot_wider(names_from = Bioregion,
+              values_from = ValText) %>% 
+  arrange(match(Trait, names(Trait.labs)))
+cwm.table$Trait <- Trait.labs
+
+write.csv(cwm.table,
+          file = here("tables/cwm_bioregions_to_annotate.csv"), row.names = FALSE)
+```
+
+## Sig test Ctotals
+```{r}
+ctotal.kw <- zoop.163.ctotal %>% 
+  group_by(Trait) %>% 
+  do(tidy(kruskal.test(x=.$CTotal, g =.$Bioregion)))
+
+ctotal.dunn <- zoop.163.ctotal %>% 
+  group_by(Trait) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$CTotal, g =.$Bioregion, 
+                                        method = "bh", alpha = 0.001))) %>% 
+  filter(P.adjusted >= 0.0005) 
+
+
+ctotal.sum <- zoop.163.ctotal %>% 
+  group_by(Bioregion, Trait) %>% 
+  summarise(ValMean = mean(CTotal),
+            ValSD = sd(CTotal), 
+            ValMedian = median(CTotal),
+            ValIQR = IQR(CTotal),
+            ValMin = min(CTotal),
+            ValMax = max(CTotal),
+            ValN = n(),
+            .groups = "drop") %>% 
+  arrange(Bioregion, Trait) 
+
+
+# Per bioregion and functional group
+ctotal.table <- ctotal.sum %>% 
+  select(Bioregion, Trait, ValMean, ValSD) %>% 
+  mutate(ValText = paste(round(ValMean),"\u00b1",round(ValSD))) %>%
+  select(-c(ValMean, ValSD)) %>% 
+  pivot_wider(names_from = Bioregion,
+              values_from = ValText) %>% 
+  arrange(match(Trait, names(Trait.labs)))
+
+# write.csv(ctotal.table,
+#           file = here("tables/ctoal_bioregions_to_annotate.csv"), row.names = FALSE)
+```
+

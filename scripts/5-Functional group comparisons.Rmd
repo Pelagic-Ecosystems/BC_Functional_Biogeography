@@ -1,15 +1,11 @@
 ---
-title: "Functional group analysis"
+title: "Functional group comparisons"
 author: "Patrick Pata"
 date: "2023-10-24"
 output: html_document
 ---
 
-This file identifies the functional groups based on a cluster analysis of the gawdis dissimilarity between 8 traits. Figures exploring how the functional groups are projected in the trait space and the relationship of the other traits not used in the gawdis analysis to the trait space are generated. 
-
-Additionally: 
-- The significant differences in the means and ranges of trait values are compared between functional groups. 
-- The proportion of functional groups to each of the association groups in Pata et al. (2022) are visualized.
+This files compares the functional groups based on trait characteristics.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -31,14 +27,18 @@ clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
 
 load(here("data/functional_grouping_results_20240617.RData"))
 
+fungrp.colors <- c("olivedrab3","darkolivegreen4","darkgreen","gold3",
+                  "lightcoral","magenta4","orchid",
+                  "darkorange2","steelblue2","turquoise3")
+                               
+
 # Load a dataframe of merging the dendrogram at different levels
 fg.merge <- read.csv(here("data/fg_cluster_merge.csv")) %>%
   rename(fungrp = fungrp10)
 ```
 
 # 2. Create table of trait value averages between functional groups
-```{r}
-# Create table of species and numeric traits by functional grouo
+```{r, eval = FALSE}
 sp.fg.num <- od.revised %>%
   select(Species, fungrp) %>%
   left_join(traits.num, 
@@ -69,15 +69,9 @@ fg.traits.sum <- sp.fg.num %>%
             traitN = n(),
             .groups = "drop") %>% 
   arrange(traitName, fungrp)
-
-# Export table of functional group by summary values, sectioned by traits. This will be annotated in excel.
-write.csv(fg.traits.sum,
-          file = here("tables/fg_traits_to_annotate.csv"), row.names = FALSE)
-
 ```
 
 # 3. Calculate significant difference in trait values between functional groups
-Note that the Dunns test will print out long outputs
 ```{r, eval=FALSE}
 # Compare trait distributions between functional groups
 library(broom)
@@ -124,7 +118,6 @@ fg.kw.sub.2 <- fungrp.num.2 %>%
   filter(p.value < 0.05) %>% 
   arrange(-p.value) %>% 
   mutate(fg.cluster = "FG2")
-
 
 
 # Go through Dunn test for each level of clustering and rerun these tests
@@ -203,10 +196,9 @@ fg.comp.dunn.res <- bind_rows(
 
 save(fg.comp.kw.res, fg.comp.dunn.res,
      file = here("data/fg_comparison_kwdunn_results.RData"))
-
 ```
 
-# 4. Plot results of KW and Dunn tests
+# 4. FigS3 Plot results of KW and Dunn tests
 ```{r, warning=FALSE, fig.width=6}
 # fg.comp.kw.res contains the overall fg KW and the 2- and 3-cluster solutions which have some no significant differences
 # fg.com.dunn.res contains the Dunn test results with p-values < 0.05, although the significantly different pairs are those with p < alpha/2 (which is 0.0005).
@@ -248,9 +240,9 @@ traitplots <- vector("list",2)
 count <- 1
 tname_label = c("Water content","Body length","Dry weight","Carbon weight",
                 "Ws. respiration rate","Ws. clearance rate",
-                "Ws. ammonia excretion rate","Ws. phosphate excretion rate",
+                "Ws. ammonium excretion rate","Ws. phosphate excretion rate",
                 "Ind. respiration rate","Ind. clearance rate",
-                "Ind. ammonia excretion rate","Ind. phosphate excretion rate",
+                "Ind. ammonium excretion rate","Ind. phosphate excretion rate",
                 "Nitrogen weight","Carbon content",
                 "Nitrogen content","Phosphorus content",
                 "Phosphorus weight","C:N","N:P","C:P")
@@ -306,89 +298,7 @@ plot_grid(p.traits, p.overall,
           ncol = 1, rel_heights = c(5,1.3),
           labels = c("","u"))
 
-ggsave(file = here("figures/fig_s7__fungrps_sigdiff_dunn.png"),
+ggsave(file = here("figures/fig_s3_fungrps_sigdiff_dunn.png"),
        height = 16, width = 12, dpi = 300)
 
 ```
-
-
-# 5. Comparing functional groups with association groups
-```{r, eval=FALSE}
-# Load list of association groups
-#    Assoc group dataframe is sp.table from Pata et al. (2022; PinO)
-load(here("data/Assoc_group_kendallresults_11022021.RData"))
-
-# Match with functional groups
-assoc.fg <- sp.table %>% 
-  select(Species, AssocGroup, AssocGroup.sub) %>% 
-  left_join(select(pcoa.vec, Species, fungrp, majorgroup),
-            by = "Species") %>% 
-  mutate(fungrp = if_else(is.na(fungrp), "no group", fungrp))
-
-# view(assoc.fg %>% 
-#        filter(is.na(fungrp)))
-# assoc.fg.tab <- table(assoc.fg$AssocGroup, assoc.fg$fungrp)
-
-assoc.fg.tab <- assoc.fg %>% 
-  select(AssocGroup, fungrp) %>% 
-  group_by(AssocGroup, fungrp) %>% 
-  mutate(nspecies = n()) %>% 
-  ungroup() %>% 
-  distinct() %>% 
-  mutate(fungrp = factor(fungrp, levels = c("FG1","FG2","FG3","FG4","FG5",
-                                            "FG6","FG7","FG8","FG9","FG10",
-                                            "no group"))) 
-
-assoc.fg.tab.totals <- assoc.fg.tab %>% 
-  group_by(AssocGroup) %>% 
-  mutate(totalNG = sum(nspecies)) %>% 
-  ungroup() %>% 
-  filter(fungrp != "no group") %>% 
-  group_by(AssocGroup) %>% 
-  mutate(totalFG = sum(nspecies)) %>% 
-  ungroup() %>% 
-  distinct(AssocGroup, totalNG, totalFG)
-
-assoc.fg.tab <- assoc.fg.tab %>% 
-  left_join(assoc.fg.tab.totals) %>% 
-  mutate(AGlab1 = paste0(AssocGroup, '\nN = ', totalNG),
-         AGlab2 = paste0(AssocGroup, '\nN = ', totalFG))
-  
-# Plot
-ggplot(assoc.fg.tab,
-             aes(x = nspecies, y = AGlab1, fill = fungrp)) +
-  geom_bar(position = "fill", stat = "identity") +
-  scale_x_reverse(position = "bottom", expand = c(0, 0),
-                  labels = c("0.00" = "1","0.25" = "0.75",
-                             "0.50" = "0.50", "0.75" = "0.25", "1.00" = "0")) +
-  ylab("Association Group") + xlab("Proportion") +
-  scale_y_discrete(limits = rev) +
-  scale_fill_manual("Functional Group",
-    values = c(fungrp.colors,"cornsilk3")) +
-  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  theme(legend.position = "top", legend.justification = c(0,1),
-        legend.margin=margin(0,0,0,0), legend.box.margin=margin(0,0,0,-10))
-
-# ggsave(filename = here("figures/extra_assoc_fun_group_match.png"),
-#     width = 8, height= 4, units = "in", dpi = 600, bg = "white")
-
-
-# Plot version 2 without "no group" species
-ggplot(assoc.fg.tab %>% filter(fungrp != "no group"),
-             aes(x = nspecies, y = AGlab2, fill = fungrp)) +
-  geom_bar(position = "fill", stat = "identity") +
-  scale_x_reverse(position = "bottom", expand = c(0, 0),
-                  labels = c("0.00" = "1","0.25" = "0.75",
-                             "0.50" = "0.50", "0.75" = "0.25", "1.00" = "0")) +
-  ylab("Association Group") + xlab("Proportion") +
-  scale_y_discrete(limits = rev) +
-  scale_fill_manual("Functional Group",
-    values = c(fungrp.colors,"cornsilk3")) +
-  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  theme(legend.position = "top", legend.justification = c(0,1),
-        legend.margin=margin(0,0,0,0), legend.box.margin=margin(0,0,0,-10))
-
-# ggsave(filename = here("figures/extra_assoc_fun_group_match_v2.png"),
-#     width = 8, height= 4, units = "in", dpi = 600, bg = "white")
-```
-
