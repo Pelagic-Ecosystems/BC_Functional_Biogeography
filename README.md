@@ -9,7 +9,7 @@ Main manuscript
 * Fig. 5 - File 7
 * Fig. 6 - File 9
 * Fig. 7 - File 10
-* Fig. 8 - Sections in File 6 and 8
+* Fig. 8 - File 6 and 8
 
 Supplementary material
 
@@ -30,5 +30,5 @@ Supplementary material
 
 
 
-Files 0, 1, and 2 are for data wrangling and trait matrix curation. If you wish to run these scripts, please create the trait\_database\_raw/ folder with the data in this repository: https://github.com/Pelagic-Ecosystems/Zooplankton\_trait\_database. If you need access to the raw zooplankton community data, please connect with the authors or visit https://www.dfo-mpo.gc.ca/science/species-especes/plankton-plancton/basedonnees-zooplankton-database/index-eng.html.
+Files 0, 1, and 2 are for data wrangling and trait matrix curation. If you wish to run these scripts, please create the trait_database_raw/ folder with the data in this repository: https://github.com/Pelagic-Ecosystems/Zooplankton_trait_database. If you need access to the raw zooplankton community data, please connect with the authors or visit https://www.dfo-mpo.gc.ca/science/species-especes/plankton-plancton/basedonnees-zooplankton-database/index-eng.html.
 
