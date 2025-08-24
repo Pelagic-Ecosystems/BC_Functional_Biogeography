@@ -625,13 +625,13 @@ ggsave(file = here("figures/fig_s2_fungrps_values.png"),
 # 7. Fig3 Trait space plots
 The scripts in this section plots the projection of the species along the 5-axis trait space. Species are first colored by taxonomic groups, then by functional groups. Biplots showing the correlation of the traits to the trait space axes are then visualized for the 8 traits used in the functional group analysis and for the rest of the colinear traits that were excluded from the analysis above.
 
-## Set 1 Taxonomic grouping
+## Fig 3 PCoA 1 and 2
 ```{r}
 # Correctly label axes as PCoA
 axisname <- colnames(pcoa.vec[,c(2:6)])
 axisname_label <- str_replace(axisname, "PC", "PCoA ")
 
-# Axis 1 & 2
+# A. Major groups
 axestoplot <- c(1,2)
 # Calculate hulls
 clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
@@ -658,99 +658,18 @@ g1 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]],
   geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = majorgroup)) +
   scale_color_manual(values = majorgroup.colors$color, name = "Major Groups") +
   scale_fill_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  theme(aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
+  theme(aspect.ratio = 1, legend.position="bottom", 
+        legend.title = element_text(color = 'black', size = 14, face = 'bold'),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 14),
+        legend.key = element_rect(fill = "white"),
+        panel.background = element_rect(fill = "grey80")) +
+   guides(colour = guide_legend(title.position="top", title.hjust = 0.5,
+                                legend.margin=margin(),
+                                nrow=5, byrow=TRUE))
 
-# Axis 1&3
-axestoplot <- c(1,3)
-# Calculate hulls
-clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
-  mutate(group = "all") %>% 
-  bind_cols(majorgroup = pcoa.vec$majorgroup)
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,3], key="level")
-hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,4], key="level")
-hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-
-# Plot trait space
-g2 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname_label[axestoplot[1]], 
-       y = axisname_label[axestoplot[2]]) +
-  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
-                color = "grey30", fill = "white", show.legend = FALSE) +
-  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
-               alpha = 0.05,show.legend = FALSE) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = majorgroup)) +
-  scale_color_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  scale_fill_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
-
-# Axis 4&5
-axestoplot <- c(4,5)
-# Calculate hulls
-clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
-  mutate(group = "all") %>% 
-  bind_cols(majorgroup = pcoa.vec$majorgroup)
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,3], key="level")
-hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,4], key="level")
-hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-
-# Plot trait space
-g3 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname_label[axestoplot[1]], 
-       y = axisname_label[axestoplot[2]]) +
-  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
-                color = "grey30", fill = "white", show.legend = FALSE) +
-  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
-               alpha = 0.05,show.legend = FALSE) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = majorgroup)) +
-  scale_color_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  scale_fill_manual(values = majorgroup.colors$color, name = "Major Groups") +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
-
-# get_legend() is not working properly in ggplot2 v.3.5.0. This is an open issue (https://github.com/wilkelab/cowplot/issues/202). For now, the legend needs to be annotated from the previous version of this figure generate in an earlier ggplot2 version.
-legend_b1 <- get_legend(
-  g1 + 
-    guides(color = guide_legend(nrow = 2)) +
-    theme(legend.position = "bottom")
-)
-
-prow1 <- plot_grid(g1,g2,g3, nrow = 1, labels = c("a","b","c"),
-          align = "hv")
-prow1 <- plot_grid(prow1, legend_b1, ncol = 1, rel_heights = c(1, .1))
-```
-
-
-## Set 2 Functional grouping
-```{r}
-# Axis 1 & 2
-axestoplot <- c(1,2)
-# Calculate hulls
+# Functional groups
 clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
   mutate(group = "all") %>% 
   bind_cols(fungrp = pcoa.vec$fungrp)
@@ -761,41 +680,7 @@ dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2],
                  level=clustPoints[,4], key="level")
 hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 
-# Plot trait space
-g1 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "fungrp")) + 
-  labs(x = axisname_label[axestoplot[1]], 
-       y = axisname_label[axestoplot[2]]) +
-  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
-                color = "grey30", fill = "white", show.legend = FALSE) +
-  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
-               alpha = 0.05,show.legend = FALSE) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = fungrp)) +
-  scale_color_manual(values = fungrp.colors, name = "Functional Groups") +
-  scale_fill_manual(values = fungrp.colors, name = "Functional Groups") +
-  theme(aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
-
-# Axis 1&3
-axestoplot <- c(1,3)
-# Calculate hulls
-clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
-  mutate(group = "all") %>% 
-  bind_cols(fungrp = pcoa.vec$fungrp)
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,3], key="level")
-hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,4], key="level")
-hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-
-# Plot trait space
+# B. Plot trait space
 g2 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "fungrp")) + 
   labs(x = axisname_label[axestoplot[1]], 
@@ -809,61 +694,28 @@ g2 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]],
   geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = fungrp)) +
   scale_color_manual(values = fungrp.colors, name = "Functional Groups") +
   scale_fill_manual(values = fungrp.colors, name = "Functional Groups") +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
+  theme(aspect.ratio = 1, legend.position="bottom", 
+        legend.title = element_text(color = 'black', size = 14, face = 'bold'),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 14),
+        legend.key = element_rect(fill = "white"),
+        panel.background = element_rect(fill = "grey80")) +
+   guides(colour = guide_legend(title.position="top", title.hjust = 0.5))
 
-# Axis 4&5
-axestoplot <- c(4,5)
-# Calculate hulls
-clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
-  mutate(group = "all") %>% 
-  bind_cols(fungrp = pcoa.vec$fungrp)
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,3], key="level")
-hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
-dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
-                 level=clustPoints[,4], key="level")
-hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
 
-# Plot trait space
-g3 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "fungrp")) + 
-  labs(x = axisname_label[axestoplot[1]], 
-       y = axisname_label[axestoplot[2]]) +
-  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
-                color = "grey30", fill = "white", show.legend = FALSE) +
-  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
-               alpha = 0.05,show.legend = FALSE) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = fungrp)) +
-  scale_color_manual(values = fungrp.colors, name = "Functional Groups") +
-  scale_fill_manual(values = fungrp.colors, name = "Functional Groups") +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12),
-        panel.background = element_rect(fill = "grey80")) 
+cowplot::plot_grid(g1, g2, labels = "auto")
 
-legend_b1 <- get_legend(
-  g1 + 
-    guides(color = guide_legend(nrow = 1)) +
-    theme(legend.position = "bottom")
-)
+ggsave(filename = here("figures/fig_3_pcoa12_withlabels.png"),
+    width = 15, height= 10, units = "in", dpi = 600, bg = "white")
 
-prow2 <- plot_grid(g1,g2,g3, nrow = 1, labels = c("d","e","f"),
-          align = "hv")
-prow2 <- plot_grid(prow2, legend_b1, ncol = 1, rel_heights = c(1, .1))
-prow2
-```
 
-## Set 3 Biplot trait correlation
-```{r}
+g1 <- g1 +
+  theme(aspect.ratio = 1, legend.position="none")
+g2 <- g1 +
+  theme(aspect.ratio = 1, legend.position="none")
+
+# C. Biplot categorical traits
 colnames(species.traits) <- c("dry weight", "water content", 
                               "ws. respiration rate", "ws. clearance rate",
                               "ws. excretion rate N", "broadcasting",
@@ -883,7 +735,6 @@ traits.pcoa.cor.sig <- mFD::traits.faxes.cor(
   arrange(axis, -value) %>% 
   mutate(r = sqrt(value))
 
-# Axis 1 & 2
 axestoplot <- c(1,2)
 # Show only traits with at least one significant correlation to the axes
 U0 <- traits.pcoa.cor.sig %>% 
@@ -898,17 +749,17 @@ maxpos <- 1/max(abs(U1))
 pcoa.vec.2 <- pcoa.vec 
 pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
-g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
+g3 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
   labs(x = axisname_label[axestoplot[1]], 
        y = axisname_label[axestoplot[2]]) +
   geom_vline(xintercept = 0, colour='darkgray') + 
   geom_hline(yintercept = 0, colour='darkgray') +
   theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12)) + 
+        legend.title = element_text(color = 'black', size = 14, face = 'bold'),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 14)) + 
       geom_segment(data = U1, aes(x = rep(0,nrow(U1)),y =rep(0,nrow(U1)),
                                  xend = U1[,1],yend = U1[,2]),
                    lineend = "round", size = 0.5, colour = "grey80") +
@@ -917,78 +768,7 @@ g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
                   color="black", size = 4)
 
 
-# Axis 1&3
-axestoplot <- c(1,3)
-# Show only traits with at least one significant correlation to the axes
-U0 <- traits.pcoa.cor.sig %>% 
-  filter(axis %in% axisname[axestoplot]) %>% 
-  filter(r >= 0.33) %>% 
-  distinct(trait)
-U2 <- as.data.frame(traits.pcoa.cor[,axestoplot]) %>% 
-  rownames_to_column("trait") %>%
-  filter(trait %in% U0$trait) %>%
-  column_to_rownames("trait")
-maxpos <- 1/max(abs(U2))
-pcoa.vec.2 <- pcoa.vec 
-pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
-# Plot trait space
-g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname_label[axestoplot[1]],
-       y = axisname_label[axestoplot[2]]) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12)) + 
-  geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
-                             xend = U2[,1],yend = U2[,2]),
-               lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U2, color = "grey80", shape = 8)+
-  geom_text_repel(data = U2, aes(label=rownames(U2),), 
-                  color="black", size = 4)
-
-# Axis 4&5
-axestoplot <- c(4,5)
-# Show only traits with at least one significant correlation to the axes
-U0 <- traits.pcoa.cor.sig %>% 
-  filter(axis %in% axisname[axestoplot]) %>% 
-  filter(r >= 0.33) %>% 
-  distinct(trait)
-U3 <- as.data.frame(traits.pcoa.cor[,axestoplot]) %>% 
-  rownames_to_column("trait") %>%
-  filter(trait %in% U0$trait) %>%
-  column_to_rownames("trait")
-maxpos <- 1/max(abs(U3))
-pcoa.vec.2 <- pcoa.vec 
-pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos *2
-# Plot trait space
-g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
-                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
-  labs(x = axisname_label[axestoplot[1]],
-       y = axisname_label[axestoplot[2]]) +
-  geom_vline(xintercept = 0, colour='darkgray') + 
-  geom_hline(yintercept = 0, colour='darkgray') +
-  theme( aspect.ratio = 1, legend.position="none", 
-        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
-        legend.text = element_text(size = 12),
-        axis.title = element_text(size = 12),
-        axis.text = element_text(size = 12)) + 
-  geom_segment(data = U3, aes(x = rep(0,nrow(U3)),y =rep(0,nrow(U3)),
-                              xend = U3[,1],yend = U3[,2]),
-               lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U3, color = "grey80", shape = 8)+
-  geom_text_repel(data = U3, aes(label=rownames(U3),), 
-                  color="black", size = 4)
-
-prow3 <- plot_grid(g7,g8,g9, nrow = 1, labels = c("g","h","i"))
-
-```
-
-## Set 4 Other numeric traits not used in PCOA
-```{r}
+# D. Numeric Traits
 traits.num.2 <- distinct(pcoa.vec, Species) %>% 
   left_join(traits.num, by = "Species") %>% 
   pivot_longer(col = -Species, names_to = "name", values_to = "val") %>% 
@@ -1031,10 +811,148 @@ U0 <- traits.pcoa.cor.sig %>%
   filter(axis %in% axisname[axestoplot]) %>% 
   filter(r >= 0.33) %>% 
   distinct(trait)
-U1 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
+U2 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
   filter(trait %in% U0$trait) %>%
   column_to_rownames("trait")
 maxpos <- 1/max(abs(U1))
+pcoa.vec.3 <- pcoa.vec 
+pcoa.vec.3[axisname[axestoplot]] <- pcoa.vec.3[axisname[axestoplot]]* maxpos*2
+# Plot trait space
+g4 <- ggplot(pcoa.vec.3, aes_string(x = axisname[axestoplot[1]], 
+                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
+  labs(x = axisname_label[axestoplot[1]],
+       y = axisname_label[axestoplot[2]]) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  theme( aspect.ratio = 1, legend.position="none", 
+        legend.title = element_text(color = 'black', size = 14, face = 'bold'),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 14)) + 
+      geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
+                                 xend = U2[,1],yend = U2[,2]),
+                   lineend = "round", size = 0.5, colour = "grey80") +
+  geom_point(data = U2, color = "grey80", shape = 8) +
+  geom_text_repel(data = U2, aes(label=rownames(U2),), 
+                  color="black", size = 4) +
+  xlim(min(U2[,1])-0.05, max(U2[,1])+0.05) +
+  ylim(min(U2[,2])-0.05, max(U2[,2])+0.05)
+
+cowplot::plot_grid(g1, g2, g3, g4,
+                   labels = "auto", label_size = 16)
+
+ggsave(filename = here("figures/fig_3_pcoa12.png"),
+    width = 10, height= 10, units = "in", dpi = 600, bg = "white")
+```
+
+## Supp Fig S4 PCoA 3-5
+```{r}
+# A. Functional groups
+# Correctly label axes as PCoA
+axisname <- colnames(pcoa.vec[,c(2:6)])
+axisname_label <- str_replace(axisname, "PC", "PCoA ")
+
+# Axis 1&3
+axestoplot <- c(1,3)
+# Calculate hulls
+clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
+  mutate(group = "all") %>% 
+  bind_cols(fungrp = pcoa.vec$fungrp)
+dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
+                 level=clustPoints[,3], key="level")
+hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
+dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
+                 level=clustPoints[,4], key="level")
+hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
+
+# Plot trait space
+g5 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
+                            y = axisname[axestoplot[2]], color = "fungrp")) + 
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
+  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
+                color = "grey30", fill = "white", show.legend = FALSE) +
+  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
+               alpha = 0.05,show.legend = FALSE) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = fungrp)) +
+  scale_color_manual(values = fungrp.colors, name = "Functional Groups") +
+  scale_fill_manual(values = fungrp.colors, name = "Functional Groups") +
+  theme( aspect.ratio = 1, legend.position="none", 
+        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
+        legend.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        panel.background = element_rect(fill = "grey80")) 
+
+# Axis 4&5
+axestoplot <- c(4,5)
+# Calculate hulls
+clustPoints <- as.data.frame(species.pcoa[,axestoplot]) %>%
+  mutate(group = "all") %>% 
+  bind_cols(fungrp = pcoa.vec$fungrp)
+dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
+                 level=clustPoints[,3], key="level")
+hulls.global <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
+dt <- data.table(xdata=clustPoints[,1], ydata=clustPoints[,2], 
+                 level=clustPoints[,4], key="level")
+hulls.mgroup <- dt[dt[, .I[chull(xdata, ydata)], by = level]$V1]
+
+# Plot trait space
+g6 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]], 
+                            y = axisname[axestoplot[2]], color = "fungrp")) + 
+  labs(x = axisname_label[axestoplot[1]], 
+       y = axisname_label[axestoplot[2]]) +
+  geom_polygon(data = hulls.global, aes(x=xdata,y=ydata,fill=level),
+                color = "grey30", fill = "white", show.legend = FALSE) +
+  geom_polygon(data = hulls.mgroup, aes(x=xdata,y=ydata,fill=level,color=level), 
+               alpha = 0.05,show.legend = FALSE) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  geom_point(size = 3, alpha = 0.9, shape = 16, aes(color = fungrp)) +
+  scale_color_manual(values = fungrp.colors, name = "Functional Groups") +
+  scale_fill_manual(values = fungrp.colors, name = "Functional Groups") +
+  theme( aspect.ratio = 1, legend.position="none", 
+        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
+        legend.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        panel.background = element_rect(fill = "grey80")) 
+
+
+# B. Categorical traits
+colnames(species.traits) <- c("dry weight", "water content", 
+                              "ws. respiration rate", "ws. clearance rate",
+                              "ws. excretion rate N", "broadcasting",
+                              "brooding", "cruise", "current",
+                              "active ambush", "passive ambush",
+                              "herbivore", "omnivore", "carnivore", "detritivore")
+traits.pcoa.cor <- cor(scale(species.traits[,6:15] , center=TRUE, scale=TRUE), 
+         pcoa.vec[,c(2:6)], use="pairwise.complete.obs")  
+
+
+# Identifying significant relationships between traits and PCoA axes
+traits.pcoa.cor.sig <- mFD::traits.faxes.cor(
+  sp_tr = species.traits,
+  sp_faxes_coord = species.pcoa,
+  plot = FALSE, stop_if_NA = FALSE) %>%  
+  filter(p.value < 0.05) %>% 
+  arrange(axis, -value) %>% 
+  mutate(r = sqrt(value))
+
+# Axis 1&3
+axestoplot <- c(1,3)
+# Show only traits with at least one significant correlation to the axes
+U0 <- traits.pcoa.cor.sig %>% 
+  filter(axis %in% axisname[axestoplot]) %>% 
+  filter(r >= 0.33) %>% 
+  distinct(trait)
+U2 <- as.data.frame(traits.pcoa.cor[,axestoplot]) %>% 
+  rownames_to_column("trait") %>%
+  filter(trait %in% U0$trait) %>%
+  column_to_rownames("trait")
+maxpos <- 1/max(abs(U2))
 pcoa.vec.2 <- pcoa.vec 
 pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
@@ -1049,14 +967,82 @@ g7 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
         legend.text = element_text(size = 12),
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 12)) + 
-      geom_segment(data = U1, aes(x = rep(0,nrow(U1)),y =rep(0,nrow(U1)),
-                                 xend = U1[,1],yend = U1[,2]),
-                   lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U1, color = "grey80", shape = 8) +
-  geom_text_repel(data = U1, aes(label=rownames(U1),), 
-                  color="black", size = 4) +
-  xlim(min(U1[,1])-0.05, max(U1[,1])+0.05) +
-  ylim(min(U1[,2])-0.05, max(U1[,2])+0.05)
+  geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
+                             xend = U2[,1],yend = U2[,2]),
+               lineend = "round", size = 0.5, colour = "grey80") +
+  geom_point(data = U2, color = "grey80", shape = 8)+
+  geom_text_repel(data = U2, aes(label=rownames(U2),), 
+                  color="black", size = 4)
+
+# Axis 4&5
+axestoplot <- c(4,5)
+# Show only traits with at least one significant correlation to the axes
+U0 <- traits.pcoa.cor.sig %>% 
+  filter(axis %in% axisname[axestoplot]) %>% 
+  filter(r >= 0.33) %>% 
+  distinct(trait)
+U3 <- as.data.frame(traits.pcoa.cor[,axestoplot]) %>% 
+  rownames_to_column("trait") %>%
+  filter(trait %in% U0$trait) %>%
+  column_to_rownames("trait")
+maxpos <- 1/max(abs(U3))
+pcoa.vec.2 <- pcoa.vec 
+pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos *2
+# Plot trait space
+g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
+                            y = axisname[axestoplot[2]], color = "majorgroup")) + 
+  labs(x = axisname_label[axestoplot[1]],
+       y = axisname_label[axestoplot[2]]) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  theme( aspect.ratio = 1, legend.position="none", 
+        legend.title = element_text(color = 'black', size = 12, face = 'bold'),
+        legend.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  geom_segment(data = U3, aes(x = rep(0,nrow(U3)),y =rep(0,nrow(U3)),
+                              xend = U3[,1],yend = U3[,2]),
+               lineend = "round", size = 0.5, colour = "grey80") +
+  geom_point(data = U3, color = "grey80", shape = 8)+
+  geom_text_repel(data = U3, aes(label=rownames(U3),), 
+                  color="black", size = 4)
+
+
+# C. Numeric traits
+traits.num.2 <- distinct(pcoa.vec, Species) %>% 
+  left_join(traits.num, by = "Species") %>% 
+  pivot_longer(col = -Species, names_to = "name", values_to = "val") %>% 
+  mutate(val = if_else(grepl("PWW|PDW|CN|CP|NP", name),
+                       val,log(val))) %>% 
+  pivot_wider(names_from = "name", values_from = "val") %>% 
+  column_to_rownames("Species")
+# Adjust column names
+trait.labels <- c("%water", "%C", "%N","%P", 
+                  "C:N", "N:P", "C:P", 
+                  "body length", "dry weight", 
+                  "C weight",
+                  "N weight", "P weight",
+                  "ws. respiration", "ws. clearance",
+                  "ws. N excretion", "ws. P excretion",
+                  "ind. respiration", "ind. clearance",
+                  "ind. N excretion", "ind. P excretion")
+colnames(traits.num.2) <- trait.labels
+
+traits.pcoa.cor <- cor(scale(traits.num.2 , center=TRUE, scale=TRUE), 
+         pcoa.vec[,c(2:6)], use="pairwise.complete.obs") %>% 
+  as.data.frame() %>% 
+  rownames_to_column("trait")
+traits.pcoa.cor$trait <- trait.labels
+
+
+# Identifying significant relationships between traits and PCoA axes
+traits.pcoa.cor.sig <- mFD::traits.faxes.cor(
+  sp_tr = traits.num.2,
+  sp_faxes_coord = species.pcoa,
+  plot = FALSE, stop_if_NA = FALSE) %>%  
+  filter(p.value < 0.05) %>% 
+  arrange(axis, -value) %>% 
+  mutate(r = sqrt(value))
 
 
 # Axis 1&3
@@ -1066,14 +1052,14 @@ U0 <- traits.pcoa.cor.sig %>%
   filter(axis %in% axisname[axestoplot]) %>% 
   filter(r >= 0.33) %>% 
   distinct(trait)
-U2 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
+U4 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
   filter(trait %in% U0$trait) %>%
   column_to_rownames("trait")
-maxpos <- 1/max(abs(U2))
+maxpos <- 1/max(abs(U4))
 pcoa.vec.2 <- pcoa.vec 
 pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos*2
 # Plot trait space
-g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
+g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
   labs(x = axisname_label[axestoplot[1]],
          y = axisname_label[axestoplot[2]]) +
@@ -1084,14 +1070,14 @@ g8 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
         legend.text = element_text(size = 12),
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 12)) + 
-  geom_segment(data = U2, aes(x = rep(0,nrow(U2)),y =rep(0,nrow(U2)),
-                             xend = U2[,1],yend = U2[,2]),
+  geom_segment(data = U4, aes(x = rep(0,nrow(U4)),y =rep(0,nrow(U4)),
+                             xend = U4[,1],yend = U4[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U2, color = "grey80", shape = 8)+
-  geom_text_repel(data = U2, aes(label=rownames(U2),), 
+  geom_point(data = U4, color = "grey80", shape = 8)+
+  geom_text_repel(data = U4, aes(label=rownames(U4),), 
                   color="black", size = 4) +
-  xlim(min(U2[,1])-0.05, max(U2[,1])+0.05) +
-  ylim(min(U2[,2])-0.1, max(U2[,2])+0.05)
+  xlim(min(U4[,1])-0.05, max(U4[,1])+0.05) +
+  ylim(min(U4[,2])-0.1, max(U4[,2])+0.05)
 
 # Axis 4&5
 axestoplot <- c(4,5)
@@ -1100,14 +1086,14 @@ U0 <- traits.pcoa.cor.sig %>%
   filter(axis %in% axisname[axestoplot]) %>% 
   filter(r >= 0.33) %>% 
   distinct(trait)
-U3 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
+U5 <- traits.pcoa.cor[,c(1,axestoplot+1)] %>% 
   filter(trait %in% U0$trait) %>%
   column_to_rownames("trait")
-maxpos <- 1/max(abs(U3))
+maxpos <- 1/max(abs(U5))
 pcoa.vec.2 <- pcoa.vec 
 pcoa.vec.2[axisname[axestoplot]] <- pcoa.vec.2[axisname[axestoplot]]* maxpos *2
 # Plot trait space
-g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
+g10 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]], 
                             y = axisname[axestoplot[2]], color = "majorgroup")) + 
   labs(x = axisname_label[axestoplot[1]],
          y = axisname_label[axestoplot[2]]) +
@@ -1118,23 +1104,27 @@ g9 <- ggplot(pcoa.vec.2, aes_string(x = axisname[axestoplot[1]],
         legend.text = element_text(size = 12),
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 12)) + 
-  geom_segment(data = U3, aes(x = rep(0,nrow(U3)),y =rep(0,nrow(U3)),
-                              xend = U3[,1],yend = U3[,2]),
+  geom_segment(data = U5, aes(x = rep(0,nrow(U5)),y =rep(0,nrow(U5)),
+                              xend = U5[,1],yend = U5[,2]),
                lineend = "round", size = 0.5, colour = "grey80") +
-  geom_point(data = U3, color = "grey80", shape = 8)+
-  geom_text_repel(data = U3, aes(label=rownames(U3),), 
+  geom_point(data = U5, color = "grey80", shape = 8)+
+  geom_text_repel(data = U5, aes(label=rownames(U5),), 
                   color="black", size = 4) +
-  xlim(min(U3[,1])-0.05, max(U3[,1])+0.05) +
-  ylim(min(U3[,2])-0.05, max(U3[,2])+0.05)
-
-prow4 <- plot_grid(g7,g8,g9, nrow = 1, labels = c("j","k","l"))
+  xlim(min(U5[,1])-0.05, max(U5[,1])+0.05) +
+  ylim(min(U5[,2])-0.05, max(U5[,2])+0.05)
 
 
-plot_grid(prow1, prow2, prow3, prow4, ncol = 1)
 
-ggsave(filename = here("figures/fig_3_Gawdis_species_trait_PCOA.png"),
-    width = 15, height= 20, units = "in", dpi = 600, bg = "white")
+cowplot::plot_grid(g5, g6,
+                   g7, g8,
+                   g9, g10,
+                   nrow = 3,
+                   labels = "auto", label_size = 16)
+
+# ggsave(filename = here("figures/new_figs/fig_3_supp_alternative.png"),
+#     width = 10, height= 15, units = "in", dpi = 600, bg = "white")
 ```
+
 
 # 8. Export information
 ```{r}

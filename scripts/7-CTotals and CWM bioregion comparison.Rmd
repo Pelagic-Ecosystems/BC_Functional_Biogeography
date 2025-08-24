@@ -294,7 +294,7 @@ ggsave(filename = here("figures/fig_4_com_total_rates_legend_Aug2025.png"),
 # 4. Table1 Bioregion comparison
 
 ## Sig test CWM 
-```{r}
+```{r, eval=FALSE}
 Trait.labs <- c("Body length","Dry weight","Water content",
                "Carbon weight",
                "Nitrogen weight","Phosphorus weight",
@@ -363,7 +363,7 @@ write.csv(cwm.table,
 ```
 
 ## Sig test Ctotals
-```{r}
+```{r, eval=FALSE}
 ctotal.kw <- zoop.163.ctotal %>% 
   group_by(Trait) %>% 
   do(tidy(kruskal.test(x=.$CTotal, g =.$Bioregion)))
@@ -398,7 +398,7 @@ ctotal.table <- ctotal.sum %>%
   arrange(match(Trait, names(Trait.labs)))
 
 # write.csv(ctotal.table,
-#           file = here("tables/ctoal_bioregions_to_annotate.csv"), row.names = FALSE)
+#           file = here("tables/ctotal_bioregions_to_annotate.csv"), row.names = FALSE)
 ```
 
 # 5. Fig 5. Trait comparison of bioregions

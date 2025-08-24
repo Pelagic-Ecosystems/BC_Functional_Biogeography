@@ -156,8 +156,7 @@ fundiv.ind.dun <- fundiv.ind.biom %>%
 #      file = here("data/fundiv_3721_163species_20240618.RData"))
 ```
 
-# 3. Fig S5 Functional diversity plot
-## Distribution of functional diversity metrics between bioregions
+# 3. Distribution of functional diversity metrics between bioregions
 ```{r}
 Metric.labs <- c("Species Richness","Functional Richness",
                  "Functional Dispersion","Functional Evenness",
@@ -198,12 +197,11 @@ legend_b1 <- get_legend(
 
 
 plot.violin <- plot_grid(
-  plot_grid(plotlist = fdivplots, nrow = 1, labels = c("c","d","e","f","g","h")),
+  plot_grid(plotlist = fdivplots, nrow = 1, labels = "auto"),
   legend_b1, 
   ncol = 1, rel_heights = c(1, .1))
 
-# ggsave(file = here("figures/fig_7_fundiv_violin.png"),
-#        height = 4, width = 16, dpi = 300, bg = "white")
+plot.violin
 ```
 
 

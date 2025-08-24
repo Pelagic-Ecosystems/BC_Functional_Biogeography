@@ -2,6 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
-data/
+data/restricted_data
+data/trait_database_raw
+data/new_trait_info
+data/files_to_organize
 figures/
-tables/

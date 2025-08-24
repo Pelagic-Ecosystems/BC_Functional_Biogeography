@@ -549,7 +549,7 @@ ggsave(filename = here("figures/fig_s6_fun_assem_bioregion.png"),
 
 
 # 8. Fig S8 Total rates figure but by functional clusters
-```{r}
+```{r, eval=FALSE}
 # Load the complete community data for community totals
 load(here("data/restricted_data/BC_3721_163_speciesstage_traits_20250217.RData"))
 

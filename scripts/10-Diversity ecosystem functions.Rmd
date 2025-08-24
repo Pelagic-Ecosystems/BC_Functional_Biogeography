@@ -36,8 +36,6 @@ fungrp.colors <- c("turquoise3", "steelblue2","darkorange2",
                    "olivedrab3")
                    
 clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
-
-rm(zoop.163.ctotal)
 ```
 
 # 2. Prepare the BEF matrix
@@ -151,10 +149,6 @@ results.global <- BEF.2.mod %>%
   slice_min(aic) %>%  # Select the model with the lowest AIC for each group
   rename(best_model = model_type)  # Add the best model name as a separate column
 
-# # Determine instances when the r2 >= 0.1 
-# # Log carbon and log respiration will produce similar curves so just focus on log carbon in the main figure and put log respiration in the supplementary figure.
-# results.global.high <- results.global %>% 
-#   filter(r2 >= 0.1)
 ```
 
 
@@ -175,11 +169,6 @@ results.bioregion <- BEF.2.mod %>%
   rename(best_model = model_type) %>%  # Add the best model name as a separate column
   ungroup()
 
-# # Add a column for the global r2 and filter accordingly to only instances of R2 >= 0.1
-# results.bioregion.high <- results.bioregion %>%
-#   left_join(select(results.global, Diversity, CTV, r2.global = r2),
-#             by = join_by(Diversity, CTV)) %>%
-#   filter(r2.global >= 0.1)
 ```
 
 # 4. Extra: Visual residual analysis

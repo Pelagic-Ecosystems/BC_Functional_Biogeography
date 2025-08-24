@@ -144,7 +144,7 @@ save(zoop.bc.fun, sp.regions,
 ```
 
 
-## FigS4 Species density in trait space
+## FigS5 Species density in trait space
 ```{r, fig.height=6, fig.width=5}
 species.pcoa <- pcoa.vec[,c(1:6)] %>% 
   column_to_rownames("Species")
@@ -168,7 +168,7 @@ hplot.abund <- ggplot(data = sp.regions %>%
                aes(color = fungrp, size = Abundance),
                alpha = 0.5) +
     scale_color_manual(values = fungrp.colors,
-                       name = "Functional\nGroups") +
+                       name = "Functional\nGroup") +
     scale_size_area(max_size = 20, breaks=c(10,100,1000,10000,20000),
                     name = "Abundance\n(indiv m-2)") +
   
@@ -202,7 +202,7 @@ hplot.biom <- ggplot(data = sp.regions %>%
                aes(color = fungrp, size = Biomass),
                alpha = 0.5) +
     scale_color_manual(values = fungrp.colors,
-                       name = "Functional\nGroups") +
+                       name = "Functional\nGroup") +
     scale_size_area(max_size = 23, breaks=c(10,100,1000,2000,5000),
                     name = "Biomass\n(mg m-2)") +
   
@@ -226,12 +226,12 @@ hplot.biom <- ggplot(data = sp.regions %>%
 
 cowplot::plot_grid(hplot.abund, hplot.biom, labels = "auto")
 
-ggsave(filename = here("figures/fig_S4_traits_space_ab_PC12.png"),
+ggsave(filename = here("figures/fig_S5_traits_space_ab_PC12.png"),
     width = 10, height= 12, units = "in", dpi = 600, bg = "white")
 ```
 
 
-# 4. Table S3 Bioregion composition comparisons
+# 4. Table S2 Bioregion composition comparisons
 ```{r}
 zoop.bc.fun.zeros <- zoop.bc.fun %>% 
   # Create a blank table of Key and functional groups
@@ -305,7 +305,7 @@ zoop.bc.sum.table <- bind_rows(zoop.bc.total,zoop.bc.sum.table) %>%
 
 # # Export table for annotation in excel.
 # write.csv(zoop.bc.sum.table,
-#           file = here("tables/table_S3_bioregion_fg_means_to_annotate_20240704.csv"), row.names = FALSE)
+#           file = here("tables/table_S2_bioregion_fg_means_to_annotate_20240704.csv"), row.names = FALSE)
 
 ```
 
@@ -383,8 +383,8 @@ ggplot(zbs.sum, aes(y = ValMean, x = Bioregion,
   facet_wrap(~Metric) 
 ```
 
-## For Fig7 Plot as treemap
-```{r}
+## For Fig8 Plot as treemap
+```{r, eval=FALSE}
 # install.packages("treemapify")
 library(treemapify)
 

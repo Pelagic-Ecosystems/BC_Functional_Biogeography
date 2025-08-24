@@ -5,7 +5,7 @@ date: "2023-10-24"
 output: html_document
 ---
 
-This files compares the functional groups based on trait characteristics.
+This file contains the scripts for comparing the functional groups based on trait characteristics.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
