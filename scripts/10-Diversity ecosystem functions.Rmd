@@ -53,7 +53,7 @@ B.mat <- fundiv.ind.biom %>%
   rownames_to_column("Key")
 
 EF.mat <- zoop.163.cwm %>% 
-  filter(Trait %in% c("ratioCN", "waterPWW")) %>% 
+  filter(Trait %in% c("ratioCN")) %>% 
   pivot_wider(names_from = Trait, values_from = CWM) %>% 
   left_join(zoop.163.totals, by = join_by(Key, Bioregion))
 
@@ -273,10 +273,9 @@ for (model_name in names(models)) {
 Export figure for main text and figure for supplementary materials
 
 Select which BEF pairs to plot
-Main figure: (1) FRic vs logC, (2) FDis vs logC, (3) FDis vs Water PWW, (4) FDiv vs ratioCN
-Supp figure: (1) SpRic vs logC, (2) SpRic vs logresp,(3) FRic vs logResp, (4) FDis vs logResp
+Main figure: (1) FRic vs logC, (2) FDis vs logC, (3) FDiv vs ratioCN
 
-## Fig 6 and Fig S10
+## Fig 7
 ```{r}
 # Functions for adding the curves in the plot
 addFitCurve<- function(p, row, line_color) {
@@ -357,55 +356,16 @@ p2 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
                   CTV.Text = "Total Respiration Rate")
 
 
-
 p3 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
-                  Div.val = "FDis", CTV.val = "waterPWW",
-                  Div.Text = "Functional Dispersion",
-                  CTV.Text = "CWM Water content")
-
-
-p4 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
                   Div.val = "FDiv", CTV.val = "ratioCN",
                   Div.Text = "Functional Divergence",
                   CTV.Text = "CWM C:N")
 
-cowplot::plot_grid(p1,p2,p3,p4, labels = "auto")
+cowplot::plot_grid(p1,p2,p3, nrow = 1, labels = "auto")
 
-ggsave(filename = here("figures/fig_6_BEF.png"),
+ggsave(filename = here("figures/fig_7_BEF.png"),
        width = 8, height= 7, units = "in", dpi = 600, bg = "white")
 
-
-
-# Supplementary figure
-p1 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
-                  Div.val = "Sp.Ric", CTV.val = "logRespiration",
-                  Div.Text = "Species Richness",
-                  CTV.Text = "Total Respiration Rate")
-
-
-p2 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
-                  Div.val = "FRic", CTV.val = "logExcretionN",
-                  Div.Text = "Functional Richness",
-                  CTV.Text = "Total Ammonium Excretion Rate")
-
-
-# Examples of poor model performance
-p3 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
-                  Div.val = "FEve", CTV.val = "logRespiration",
-                  Div.Text = "Functional Evenness",
-                  CTV.Text = "Total Respiration Rate")
-
-p4 <- plot_curves(data = BEF.2.mod, results.global, results.bioregion,
-                  Div.val = "FRic", CTV.val = "waterPWW",
-                  Div.Text = "Functional Richness",
-                  CTV.Text = "CWM Water Content") 
-
-
-cowplot::plot_grid(p1,p2, p3, p4, labels = "auto")
-
-
-ggsave(filename = here("figures/fig_S10_other_BEF.png"),
-       width = 8, height= 7, units = "in", dpi = 600, bg = "white")
 ```
 
 
@@ -415,7 +375,7 @@ Note that string parsing removes the negative signs for the b, so make sure to a
 res.tab <- results.global %>% 
   mutate(CTV = factor(CTV, levels = c("logRespiration",
                                       "logExcretionN",
-                                      "waterPWW","ratioCN"))) %>% 
+                                      "ratioCN"))) %>% 
   # filter(r2 >= 0.1) %>% 
   arrange(CTV, Diversity) %>% 
   # Isolate the values of a and b for the model
@@ -434,11 +394,10 @@ res.tab <- results.global %>%
 res.tab.reg <- results.bioregion %>% 
   mutate(CTV = factor(CTV, levels = c("logRespiration",
                                       "logExcretionN",
-                                      "waterPWW","ratioCN"))) %>% 
+                                      "ratioCN"))) %>% 
   # Select which bioregions to present
   filter((Diversity == "FRic" & CTV == "logRespiration") |
            (Diversity == "FDis" & CTV == "logRespiration") |
-           (Diversity == "FDis" & CTV == "waterPWW") |
            (Diversity == "FDiv" & CTV == "ratioCN")) %>% 
   
   

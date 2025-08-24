@@ -733,6 +733,7 @@ g3 <- ggplot(pcoa.vec, aes_string(x = axisname[axestoplot[1]],
         axis.text = element_text(size = 12),
         panel.background = element_rect(fill = "grey80")) 
 
+# get_legend() is not working properly in ggplot2 v.3.5.0. This is an open issue (https://github.com/wilkelab/cowplot/issues/202). For now, the legend needs to be annotated from the previous version of this figure generate in an earlier ggplot2 version.
 legend_b1 <- get_legend(
   g1 + 
     guides(color = guide_legend(nrow = 2)) +

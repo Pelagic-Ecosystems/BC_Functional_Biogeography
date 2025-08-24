@@ -333,7 +333,7 @@ p3a <- p_biplot_pca(rdaoutput = pca.ctv,
              # xmat = for.pca,
              cluster = pca.meta$FunRegion,
              axestoplot = c(1,2),
-             alpha = 0.4, legendtitle = "Functional\nAssemblages",
+             alpha = 0.4, legendtitle = "Functional\nAssemblage",
              clrs = clrs.funbioregion2, plottitle = "") +
   scale_y_reverse() +
   theme(legend.position = "bottom") +
@@ -343,7 +343,7 @@ p3b <- p_biplot_pca(rdaoutput = pca.ctv,
              # xmat = for.pca,
              cluster = pca.meta$FunRegion,
              axestoplot = c(3,4),
-             alpha = 0.4, legendtitle = "Functional\nAssemblages",
+             alpha = 0.4, legendtitle = "Functional\nAssemblage",
              clrs = clrs.funbioregion2, plottitle = "")  +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(override.aes = list(alpha = 1)))
@@ -397,7 +397,7 @@ p4a <- ggplot(U, aes(x = PC1, y = PC2)) +
                   show.legend = FALSE) +
   scale_y_reverse() +
   scale_color_manual(values = rev(fungrp.colors[sort(as.numeric(unique(U$fungrp)))]),
-                     name = "Functionals\nGroup",
+                     name = "Functional\nGroup",
            labels = paste0("FG", unique(zoop.163.ctotal.ave$fungrp)),
                      guide = guide_legend(override.aes = list(size = 4))) +
   theme(aspect.ratio = 1, legend.position = "bottom",
@@ -414,7 +414,7 @@ p4b <- ggplot(U, aes(x = PC3, y = PC4)) +
                   max.overlaps = 15, fontface = "italic",
                   show.legend = FALSE) +
   scale_color_manual(values = rev(fungrp.colors[sort(as.numeric(unique(U$fungrp)))]),
-                     name = "Functionals\nGroup",
+                     name = "Functional\nGroup",
            labels = paste0("FG", unique(zoop.163.ctotal.ave$fungrp)),
                      guide = guide_legend(override.aes = list(size = 4))) +
   theme(aspect.ratio = 1, legend.position = "bottom",
@@ -431,14 +431,14 @@ p4b <- ggplot(U, aes(x = PC3, y = PC4)) +
 cowplot::plot_grid(p1a,p2a,p3a,p4a,
                    nrow = 2,
                    labels = "auto")
-ggsave(filename = here("figures/fig_5_FA_ordinations_12.png"),
+ggsave(filename = here("figures/fig_6_FA_ordinations_12_Aug2025.png"),
        width = 12, height= 13, units = "in", dpi = 600, bg = "white")
 
 # Supplementary figure for axes 3 & 4
 cowplot::plot_grid(p1b,p2b,p3b,p4b,
                    nrow = 2,
                    labels = "auto")
-ggsave(filename = here("figures/fig_S7_FA_ordinations_34.png"),
+ggsave(filename = here("figures/fig_S5_FA_ordinations_34_Aug2025.png"),
        width = 12, height= 13, units = "in", dpi = 600, bg = "white")
 
 
@@ -623,7 +623,7 @@ for (i in c(1:6)) {
                         name = "Functional\nGroup") +
       scale_y_continuous(expand = c(0, 0),
                          name =unique(metrics[i])) +
-     xlab("Functional Assemblages") +
+     xlab("Functional Assemblage") +
       theme(legend.position = "none",
             axis.title.y.right = element_markdown()) 
   

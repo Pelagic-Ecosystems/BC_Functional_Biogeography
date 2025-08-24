@@ -264,7 +264,7 @@ plot_grid_layout
 #   rel_heights = c(3, 0.3) 
 # )
 
-ggsave(filename = here("figures/fig_4_com_total_rates.png"),
+ggsave(filename = here("figures/fig_4_com_total_rates_Aug2025.png"),
        width = 12, height= 6, units = "in", dpi = 600, bg = "white")
 
 # For manual legend annotation
@@ -286,7 +286,7 @@ ggplot(zoop.163.ctotal.plot,
   facet_wrap(~Metric, scales = "free_y")
 
 
-ggsave(filename = here("figures/fig_4_com_total_rates_legend.png"),
+ggsave(filename = here("figures/fig_4_com_total_rates_legend_Aug2025.png"),
        width = 12, height= 10, units = "in", dpi = 600, bg = "white")
 
 ```
@@ -401,3 +401,97 @@ ctotal.table <- ctotal.sum %>%
 #           file = here("tables/ctoal_bioregions_to_annotate.csv"), row.names = FALSE)
 ```
 
+# 5. Fig 5. Trait comparison of bioregions
+## Rough figure using facet wrap
+```{r, eval = FALSE}
+traits.meansd <- zoop.163.cwm %>% 
+  group_by(Bioregion, Trait) %>% 
+   summarise(ValMean = mean(CWM),
+            ValSD = sd(CWM), 
+            ValN = n(),
+            .groups = "drop") %>% 
+  arrange(Bioregion, Trait) %>% 
+  mutate(Bioregion2 = if_else(Bioregion == "Offshore","OS", "DF"),
+         Bioregion2 = if_else(Bioregion == "DeepShelf","DS", Bioregion2),
+         Bioregion2 = if_else(Bioregion == "Nearshore","NS", Bioregion2)) %>% 
+  mutate(Bioregion2 = factor(Bioregion2, levels = c("OS","DS","NS","DF"))) %>% 
+  mutate(ValSE = ValSD / sqrt(ValN))
+
+ggplot(traits.meansd, aes(x = Bioregion, y = ValMean, fill = Bioregion)) +
+  # geom_errorbar(aes(ymin = ValMean - ValSE, ymax = ValMean + ValSE),
+  geom_errorbar(aes(ymin = ValMean - ValSD, ymax = ValMean + ValSD,
+                    color = Bioregion),
+                 width = 0, size = 1) +
+  geom_point(aes(fill = Bioregion), shape = 21, size = 5) +
+  scale_color_manual(values = clrs.bioregion) +
+  scale_fill_manual(values = clrs.bioregion) +
+  theme(legend.position = "bottom",
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  facet_wrap(~Trait, scale = "free_y", ncol = 6)
+```
+
+
+## Figure with proper axis labels based on the table of results in Table S3.
+```{r, fig.width=12}
+bioregion.table <- readxl::read_xlsx(here("tables/Table_bioregion_comparisons.xlsx")) 
+
+bioreg.mean <- bioregion.table %>% 
+  select(ID, Trait, Label, Plotgrid_label, OS_MEAN, DS_MEAN, NS_MEAN, DF_MEAN) %>% 
+  pivot_longer(cols = c("OS_MEAN","DS_MEAN","NS_MEAN","DF_MEAN"),
+               names_to = "Bioregion", values_to = "meanval") %>% 
+  mutate(Bioregion = str_remove(Bioregion, "_MEAN"))
+
+bioreg.sd <- bioregion.table %>% 
+  select(ID, Trait, OS_SD, DS_SD, NS_SD, DF_SD) %>% 
+  pivot_longer(cols = c("OS_SD","DS_SD","NS_SD","DF_SD"),
+               names_to = "Bioregion", values_to = "sdval") %>% 
+  mutate(Bioregion = str_remove(Bioregion, "_SD"))
+
+bioregion.table.2 <- left_join(bioreg.mean, bioreg.sd,
+                               by = join_by(ID, Trait, Bioregion)) %>% 
+  mutate(Trait = factor(Trait, levels = unique(bioregion.table$Trait))) %>% 
+  
+  mutate(Bioregion2 = if_else(Bioregion == "OS","Offshore", "Deep Fjord"),
+         Bioregion2 = if_else(Bioregion == "DS","Deep Shelf", Bioregion2),
+         Bioregion2 = if_else(Bioregion == "NS","Nearshore", Bioregion2)) %>% 
+  mutate(Bioregion = Bioregion2) %>% 
+  mutate(Bioregion = factor(Bioregion, levels = c("Offshore","Deep Shelf",
+                                                  "Nearshore","Deep Fjord"))) 
+
+
+metrics <- unique(bioregion.table$Trait)
+labels <- unique(bioregion.table$Label)
+plots <- vector("list",2)
+count <- 1
+for (i in c(1:35)) {
+  plots[[count]] <- ggplot(bioregion.table.2 %>% 
+                             filter(Trait == metrics[i]), 
+                           aes(x = Bioregion, y = meanval, fill = Bioregion)) +
+    geom_errorbar(aes(ymin = meanval - sdval, ymax = meanval + sdval,
+                      color = Bioregion),
+                  width = 0, size = 1) +
+    geom_point(aes(fill = Bioregion), shape = 21, size = 5) +
+    scale_color_manual(values = clrs.bioregion) +
+    scale_fill_manual(values = clrs.bioregion) +
+    theme(legend.position = "none",
+          # axis.title.x = element_blank(),
+          axis.title.y = element_markdown(vjust = 0),
+          axis.text.y = element_text(size = 14),
+          axis.ticks.x = element_blank(),
+          axis.text.x = element_blank()) +
+    ylab(labels[i]) + xlab("")
+  
+  count <- count + 1
+}
+
+# Combine the plots into a grid
+plot_grid_layout <- plot_grid(plotlist = plots, ncol = 6, 
+                              align = "hv", labels = bioregion.table$Plotgrid_label) 
+plot_grid_layout
+
+
+ggsave(filename = here("figures/fig_7_bioregion_comparison.png"),
+    width = 12, height= 14, units = "in", dpi = 600, bg = "white")
+```
