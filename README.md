@@ -32,3 +32,4 @@ Supplementary material
 
 Files 0, 1, and 2 are for data wrangling and trait matrix curation. If you wish to run these scripts, please create the trait_database_raw/ folder with the data in this repository: https://github.com/Pelagic-Ecosystems/Zooplankton_trait_database. If you need access to the raw zooplankton community data, please connect with the authors or visit https://www.dfo-mpo.gc.ca/science/species-especes/plankton-plancton/basedonnees-zooplankton-database/index-eng.html.
 
+We are grateful to the many DFO staff, Coast Guard crews, students and researchers who participated in the surveys which contributed to the dataset collection. Taxonomic analysis was carried out by DFO’s Pacific Plankton Ecology program and raw data archived and maintained on the Institute of Ocean Sciences Zooplankton Database.
